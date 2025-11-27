@@ -363,6 +363,9 @@ static void __blk_add_trace(struct blk_trace *bt, sector_t sector, int bytes,
 	case REQ_OP_WRITE_ZEROES:
 		what |= BLK_TC_ACT(BLK_TC_WRITE_ZEROES);
 		break;
+	case REQ_OP_VERIFY:
+		what |= BLK_TC_ACT(BLK_TC_VERIFY);
+		break;
 	default:
 		break;
 	}
@@ -1414,7 +1417,9 @@ static void fill_rwbs(char *rwbs, const struct blk_io_trace2 *t)
 	else if (tc & BLK_TC_WRITE_ZEROES) {
 		rwbs[i++] = 'W';
 		rwbs[i++] = 'Z';
-	} else if (tc & BLK_TC_WRITE)
+	} else if (tc & BLK_TC_VERIFY)
+		rwbs[i++] = 'V';
+	else if (tc & BLK_TC_WRITE)
 		rwbs[i++] = 'W';
 	else if (t->bytes)
 		rwbs[i++] = 'R';
@@ -1958,6 +1963,7 @@ static const struct {
 	{ BLK_TC_DRV_DATA,	"drv_data"	},
 	{ BLK_TC_FUA,		"fua"		},
 	{ BLK_TC_WRITE_ZEROES,	"write-zeroes"	},
+	{ BLK_TC_VERIFY,	"verify"	},
 };
 
 static int blk_trace_str2mask(const char *str)
@@ -2174,6 +2180,9 @@ void blk_fill_rwbs(char *rwbs, blk_opf_t opf)
 	case REQ_OP_WRITE_ZEROES:
 		rwbs[i++] = 'W';
 		rwbs[i++] = 'Z';
+		break;
+	case REQ_OP_VERIFY:
+		rwbs[i++] = 'V';
 		break;
 	default:
 		rwbs[i++] = 'N';

@@ -230,6 +230,8 @@ static inline unsigned get_max_io_size(struct bio *bio,
 	 */
 	if (bio_op(bio) == REQ_OP_WRITE_ZEROES)
 		max_sectors = lim->max_write_zeroes_sectors;
+	else if (bio_op(bio) == REQ_OP_VERIFY)
+		max_sectors = lim->max_verify_sectors;
 	else if (is_atomic)
 		max_sectors = lim->atomic_write_max_sectors;
 	else
@@ -453,6 +455,12 @@ struct bio *bio_split_write_zeroes(struct bio *bio,
 	return bio_split_payloadless_max_sectors(bio, lim, nsegs);
 }
 
+struct bio *bio_split_verify(struct bio *bio,
+		const struct queue_limits *lim, unsigned int *nsegs)
+{
+	return bio_split_payloadless_max_sectors(bio, lim, nsegs);
+}
+
 /**
  * bio_split_to_limits - split a bio to fit the queue limits
  * @bio:     bio to be split
@@ -494,6 +502,7 @@ unsigned int blk_recalc_rq_segments(struct request *rq)
 		}
 		return 1;
 	case REQ_OP_WRITE_ZEROES:
+	case REQ_OP_VERIFY:
 		return 0;
 	default:
 		break;

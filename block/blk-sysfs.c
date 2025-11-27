@@ -205,6 +205,7 @@ QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_BYTES(max_wzeroes_unmap_sectors)
 QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_BYTES(atomic_write_max_sectors)
 QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_BYTES(atomic_write_boundary_sectors)
 QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_BYTES(max_zone_append_sectors)
+QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_BYTES(max_verify_sectors)
 
 #define QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_KB(_field)			\
 static ssize_t queue_##_field##_show(struct gendisk *disk, char *page)	\
@@ -214,6 +215,7 @@ static ssize_t queue_##_field##_show(struct gendisk *disk, char *page)	\
 
 QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_KB(max_sectors)
 QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_KB(max_hw_sectors)
+QUEUE_SYSFS_LIMIT_SHOW_SECTORS_TO_KB(verify_chunk_sectors)
 
 #define QUEUE_SYSFS_SHOW_CONST(_name, _val)				\
 static ssize_t queue_##_name##_show(struct gendisk *disk, char *page)	\
@@ -276,6 +278,65 @@ queue_max_sectors_store(struct gendisk *disk, const char *page, size_t count,
 		return ret;
 
 	lim->max_user_sectors = max_sectors_kb << 1;
+	return 0;
+}
+
+/*
+ * queue_verify_chunk_sectors_store - Configure verify operation batching
+ *
+ * This controls how REQ_OP_VERIFY operations are batched to avoid overwhelming
+ * the device queue. This is critical for devices with limited queue depth.
+ *
+ * Problem: Large verify operations can generate thousands of I/O requests.
+ *   - Devices with shallow queues cannot handle the burst and experience
+ *     timeouts/controller resets
+ *
+ * Solution: Batch the requests into manageable chunks. Submit chunk_size
+ * worth of I/Os, wait for completion, then submit the next chunk.
+ *
+ * Relationship with max_verify_sectors:
+ *
+ *   max_verify_sectors (e.g., 1024 sectors = 512KB):
+ *     - Limits the size of each individual I/O request
+ *     - Hardware/driver constraint
+ *
+ *   verify_chunk_sectors (e.g., 65536 sectors = 32MB):
+ *     - Total data to submit before waiting for completion
+ *     - Split into multiple I/Os based on max_verify_sectors
+ *     - Example: 32MB chunk = 64 separate 512KB I/Os submitted together
+ *
+ * Tuning suggestions:
+ *
+ *   - Deep queue devices (NVMe, high-end SSD): Larger chunks (64MB-256MB)
+ *     maximize throughput by keeping more I/Os in flight
+ *   - Shallow queue devices (QEMU, USB, some RAID): Smaller chunks (8MB-32MB)
+ *     prevent timeouts while still maintaining some parallelism
+ *
+ * Default is 32MB, which provides good balance for most devices.
+ */
+static int
+queue_verify_chunk_sectors_store(struct gendisk *disk, const char *page,
+		size_t count, struct queue_limits *lim)
+{
+	unsigned int verify_chunk_sectors;
+	unsigned long verify_chunk_kb;
+	ssize_t ret;
+
+	ret = queue_var_store(&verify_chunk_kb, page, count);
+	if (ret < 0)
+		return ret;
+
+	verify_chunk_sectors = verify_chunk_kb << 1;
+
+	/* Ensure chunk size doesn't exceed max_hw_sectors */
+	if (verify_chunk_sectors > lim->max_hw_sectors)
+		verify_chunk_sectors = lim->max_hw_sectors;
+
+	/* Minimum chunk size is 1 sector (512 bytes) */
+	if (verify_chunk_sectors == 0)
+		verify_chunk_sectors = 1;
+
+	lim->verify_chunk_sectors = verify_chunk_sectors;
 	return 0;
 }
 
@@ -562,6 +623,8 @@ QUEUE_LIM_RO_ENTRY(queue_atomic_write_unit_min, "atomic_write_unit_min_bytes");
 
 QUEUE_RO_ENTRY(queue_write_same_max, "write_same_max_bytes");
 QUEUE_LIM_RO_ENTRY(queue_max_write_zeroes_sectors, "write_zeroes_max_bytes");
+QUEUE_LIM_RO_ENTRY(queue_max_verify_sectors, "verify_max_bytes");
+QUEUE_LIM_RW_ENTRY(queue_verify_chunk_sectors, "verify_chunk_kb");
 QUEUE_LIM_RO_ENTRY(queue_max_hw_wzeroes_unmap_sectors,
 		"write_zeroes_unmap_max_hw_bytes");
 QUEUE_LIM_RW_ENTRY(queue_max_wzeroes_unmap_sectors,
@@ -714,6 +777,8 @@ static struct attribute *queue_attrs[] = {
 	&queue_atomic_write_unit_min_entry.attr,
 	&queue_atomic_write_unit_max_entry.attr,
 	&queue_max_write_zeroes_sectors_entry.attr,
+	&queue_max_verify_sectors_entry.attr,
+	&queue_verify_chunk_sectors_entry.attr,
 	&queue_max_hw_wzeroes_unmap_sectors_entry.attr,
 	&queue_max_wzeroes_unmap_sectors_entry.attr,
 	&queue_max_zone_append_sectors_entry.attr,

@@ -52,6 +52,7 @@ void blk_set_stacking_limits(struct queue_limits *lim)
 	lim->max_sectors = UINT_MAX;
 	lim->max_dev_sectors = UINT_MAX;
 	lim->max_write_zeroes_sectors = UINT_MAX;
+	lim->max_verify_sectors = UINT_MAX;
 	lim->max_hw_wzeroes_unmap_sectors = UINT_MAX;
 	lim->max_user_wzeroes_unmap_sectors = UINT_MAX;
 	lim->max_hw_zone_append_sectors = UINT_MAX;
@@ -518,6 +519,26 @@ int blk_validate_limits(struct queue_limits *lim)
 	if (!(lim->features & BLK_FEAT_WRITE_CACHE))
 		lim->features &= ~BLK_FEAT_FUA;
 
+	/*
+	 * Set default verify chunk size to 32MB if not already set.
+	 *
+	 * This batching mechanism prevents queue flooding during large verify
+	 * operations. Without batching, a 1GB verify with 512KB I/Os would
+	 * submit 2048 requests at once, overwhelming devices with shallow
+	 * queues (causing timeouts/resets).
+	 *
+	 * With 32MB chunks: Submit 64 requests (32MB ÷ 512KB), wait for
+	 * completion, then submit next 64. This maintains parallelism within
+	 * each chunk while preventing queue overload.
+	 *
+	 * 32MB default provides good balance - large enough for decent
+	 * throughput on capable devices, small enough to avoid timeouts on
+	 * limited hardware. Tunable via /sys/block/<dev>/queue/verify_chunk_kb
+	 */
+	if (!lim->verify_chunk_sectors)
+		lim->verify_chunk_sectors = min(32U << (20 - 9),
+						lim->max_hw_sectors);
+
 	blk_validate_atomic_write_limits(lim);
 
 	err = blk_validate_integrity_limits(lim);
@@ -818,6 +839,8 @@ int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 	t->max_dev_sectors = min_not_zero(t->max_dev_sectors, b->max_dev_sectors);
 	t->max_write_zeroes_sectors = min(t->max_write_zeroes_sectors,
 					b->max_write_zeroes_sectors);
+	t->max_verify_sectors = min(t->max_verify_sectors,
+					b->max_verify_sectors);
 	t->max_user_wzeroes_unmap_sectors =
 			min(t->max_user_wzeroes_unmap_sectors,
 			    b->max_user_wzeroes_unmap_sectors);

@@ -772,6 +772,19 @@ Description:
 		0, write zeroes is not supported by the device.
 
 
+What:		/sys/block/<disk>/queue/verify_max_bytes
+Date:		January 2026
+Contact:	Chaitanya Kulkarni <kch@nvidia.com>
+Description:
+		[RO] Devices that support verify operation in which a single
+		request can be issued to verify the integrity of the data in a
+		range of contiguous blocks on storage without any data transfer.
+		This can be used to verify data integrity using hardware offload.
+		verify_max_bytes indicates how many bytes can be verified in a
+		single verify command. If verify_max_bytes is 0, verify is not
+		supported by the device.
+
+
 What:		/sys/block/<disk>/queue/write_zeroes_unmap_max_hw_bytes
 Date:		January 2025
 Contact:	Zhang Yi <yi.zhang@huawei.com>

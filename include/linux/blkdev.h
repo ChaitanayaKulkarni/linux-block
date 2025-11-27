@@ -391,6 +391,8 @@ struct queue_limits {
 	unsigned int		max_user_discard_sectors;
 	unsigned int		max_secure_erase_sectors;
 	unsigned int		max_write_zeroes_sectors;
+	unsigned int		max_verify_sectors;
+	unsigned int		verify_chunk_sectors;
 	unsigned int		max_wzeroes_unmap_sectors;
 	unsigned int		max_hw_wzeroes_unmap_sectors;
 	unsigned int		max_user_wzeroes_unmap_sectors;
@@ -1274,6 +1276,11 @@ extern int __blkdev_issue_zeroout(struct block_device *bdev, sector_t sector,
 extern int blkdev_issue_zeroout(struct block_device *bdev, sector_t sector,
 		sector_t nr_sects, gfp_t gfp_mask, unsigned flags);
 
+#define BLKDEV_VERIFY_NOFALLBACK (1 << 0) /* do not fall back to read */
+
+int blkdev_issue_verify(struct block_device *bdev, sector_t sector,
+		sector_t nr_sects, gfp_t gfp_mask, unsigned int flags);
+
 static inline int sb_issue_discard(struct super_block *sb, sector_t block,
 		sector_t nr_blocks, gfp_t gfp_mask, unsigned long flags)
 {
@@ -1460,6 +1467,11 @@ static inline unsigned int
 bdev_write_zeroes_unmap_sectors(struct block_device *bdev)
 {
 	return bdev_limits(bdev)->max_wzeroes_unmap_sectors;
+}
+
+static inline unsigned int bdev_verify_sectors(struct block_device *bdev)
+{
+	return bdev_limits(bdev)->max_verify_sectors;
 }
 
 static inline bool bdev_nonrot(struct block_device *bdev)

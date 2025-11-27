@@ -256,6 +256,34 @@ fail:
 	return err;
 }
 
+static int blk_ioctl_verify(struct block_device *bdev, blk_mode_t mode,
+		unsigned long arg)
+{
+	u64 range[2];
+	u64 start, end, len;
+
+	if (!(mode & BLK_OPEN_READ))
+		return -EBADF;
+
+	if (copy_from_user(range, (void __user *)arg, sizeof(range)))
+		return -EFAULT;
+
+	start = range[0];
+	len = range[1];
+
+	if (len == 0)
+		return -EINVAL;
+	if ((start | len) & 511)
+		return -EINVAL;
+	if (start >= bdev_nr_bytes(bdev))
+		return -EINVAL;
+	if (check_add_overflow(start, len, &end) ||
+	    end > bdev_nr_bytes(bdev))
+		return -EINVAL;
+
+	return blkdev_issue_verify(bdev, start >> 9, len >> 9, GFP_KERNEL, 0);
+}
+
 static int put_ushort(unsigned short __user *argp, unsigned short val)
 {
 	return put_user(val, argp);
@@ -659,6 +687,8 @@ static int blkdev_common_ioctl(struct block_device *bdev, blk_mode_t mode,
 		return blk_ioctl_secure_erase(bdev, mode, argp);
 	case BLKZEROOUT:
 		return blk_ioctl_zeroout(bdev, mode, arg);
+	case BLKVERIFY:
+		return blk_ioctl_verify(bdev, mode, arg);
 	case BLKGETDISKSEQ:
 		return put_u64(argp, bdev->bd_disk->diskseq);
 	case BLKREPORTZONE:

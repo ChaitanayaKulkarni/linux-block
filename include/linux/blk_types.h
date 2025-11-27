@@ -348,6 +348,8 @@ enum req_op {
 	REQ_OP_DISCARD		= (__force blk_opf_t)3,
 	/* securely erase sectors */
 	REQ_OP_SECURE_ERASE	= (__force blk_opf_t)5,
+	/* verify sectors */
+	REQ_OP_VERIFY		= (__force blk_opf_t)6,
 	/* write data at the current zone write pointer */
 	REQ_OP_ZONE_APPEND	= (__force blk_opf_t)7,
 	/* write the zero filled sector many times */

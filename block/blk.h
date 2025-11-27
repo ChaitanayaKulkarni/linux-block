@@ -169,6 +169,9 @@ static inline bool rq_mergeable(struct request *rq)
 	if (req_op(rq) == REQ_OP_WRITE_ZEROES)
 		return false;
 
+	if (req_op(rq) == REQ_OP_VERIFY)
+		return false;
+
 	if (req_op(rq) == REQ_OP_ZONE_APPEND)
 		return false;
 
@@ -214,6 +217,9 @@ static inline unsigned int blk_queue_get_max_sectors(struct request *rq)
 
 	if (unlikely(op == REQ_OP_WRITE_ZEROES))
 		return q->limits.max_write_zeroes_sectors;
+
+	if (unlikely(op == REQ_OP_VERIFY))
+		return q->limits.max_verify_sectors;
 
 	if (rq->cmd_flags & REQ_ATOMIC)
 		return q->limits.atomic_write_max_sectors;
@@ -355,6 +361,8 @@ struct bio *bio_split_discard(struct bio *bio, const struct queue_limits *lim,
 		unsigned *nsegs);
 struct bio *bio_split_write_zeroes(struct bio *bio,
 		const struct queue_limits *lim, unsigned *nsegs);
+struct bio *bio_split_verify(struct bio *bio,
+		const struct queue_limits *lim, unsigned int *nsegs);
 struct bio *bio_split_rw(struct bio *bio, const struct queue_limits *lim,
 		unsigned *nr_segs);
 struct bio *bio_split_zone_append(struct bio *bio,
@@ -409,6 +417,8 @@ static inline struct bio *__bio_split_to_limits(struct bio *bio,
 		return bio_split_discard(bio, lim, nr_segs);
 	case REQ_OP_WRITE_ZEROES:
 		return bio_split_write_zeroes(bio, lim, nr_segs);
+	case REQ_OP_VERIFY:
+		return bio_split_verify(bio, lim, nr_segs);
 	default:
 		/* other operations can't be split */
 		*nr_segs = 0;
