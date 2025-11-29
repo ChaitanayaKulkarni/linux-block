@@ -171,6 +171,9 @@ u16 blk_to_nvme_status(struct nvmet_req *req, blk_status_t blk_sts)
 		req->error_slba =
 			le64_to_cpu(req->cmd->write_zeroes.slba);
 		break;
+	case nvme_cmd_verify:
+		req->error_slba = le64_to_cpu(req->cmd->verify.slba);
+		break;
 	default:
 		req->error_slba = 0;
 	}
@@ -453,6 +456,37 @@ static void nvmet_bdev_execute_write_zeroes(struct nvmet_req *req)
 	}
 }
 
+static void nvmet_bdev_verify_work(struct work_struct *w)
+{
+	struct nvmet_req *req = container_of(w, struct nvmet_req, b.work);
+	struct nvme_verify_cmd *verify = &req->cmd->verify;
+	sector_t nr_sector;
+	sector_t sector;
+	int ret;
+	u16 status = NVME_SC_SUCCESS;
+
+	sector = le64_to_cpu(verify->slba) << (req->ns->blksize_shift - 9);
+	nr_sector = (((sector_t)le16_to_cpu(verify->length) + 1) <<
+			(req->ns->blksize_shift - 9));
+
+	ret = blkdev_issue_verify(req->ns->bdev, sector, nr_sector,
+			GFP_KERNEL, 0);
+
+	if (ret)
+		status = blk_to_nvme_status(req, errno_to_blk_status(ret));
+
+	nvmet_req_complete(req, status);
+}
+
+static void nvmet_bdev_execute_verify(struct nvmet_req *req)
+{
+	if (!nvmet_check_transfer_len(req, 0))
+		return;
+
+	INIT_WORK(&req->b.work, nvmet_bdev_verify_work);
+	queue_work(verify_wq, &req->b.work);
+}
+
 u16 nvmet_bdev_parse_io_cmd(struct nvmet_req *req)
 {
 	switch (req->cmd->common.opcode) {
@@ -470,6 +504,9 @@ u16 nvmet_bdev_parse_io_cmd(struct nvmet_req *req)
 		return 0;
 	case nvme_cmd_write_zeroes:
 		req->execute = nvmet_bdev_execute_write_zeroes;
+		return 0;
+	case nvme_cmd_verify:
+		req->execute = nvmet_bdev_execute_verify;
 		return 0;
 	default:
 		return nvmet_report_invalid_opcode(req);

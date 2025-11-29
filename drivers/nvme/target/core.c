@@ -20,6 +20,7 @@
 
 struct kmem_cache *nvmet_bvec_cache;
 struct workqueue_struct *buffered_io_wq;
+struct workqueue_struct *verify_wq;
 struct workqueue_struct *zbd_wq;
 static const struct nvmet_fabrics_ops *nvmet_transports[NVMF_TRTYPE_MAX];
 static DEFINE_IDA(cntlid_ida);
@@ -1948,10 +1949,14 @@ static int __init nvmet_init(void)
 	if (!zbd_wq)
 		goto out_destroy_bvec_cache;
 
+	verify_wq = alloc_workqueue("nvmet-verify-wq", WQ_MEM_RECLAIM, 0);
+	if (!verify_wq)
+		goto out_free_zbd_work_queue;
+
 	buffered_io_wq = alloc_workqueue("nvmet-buffered-io-wq",
 			WQ_MEM_RECLAIM, 0);
 	if (!buffered_io_wq)
-		goto out_free_zbd_work_queue;
+		goto out_free_verify_work_queue;
 
 	nvmet_wq = alloc_workqueue("nvmet-wq",
 			WQ_MEM_RECLAIM | WQ_UNBOUND | WQ_SYSFS, 0);
@@ -1980,6 +1985,8 @@ out_free_nvmet_work_queue:
 	destroy_workqueue(nvmet_wq);
 out_free_buffered_work_queue:
 	destroy_workqueue(buffered_io_wq);
+out_free_verify_work_queue:
+	destroy_workqueue(verify_wq);
 out_free_zbd_work_queue:
 	destroy_workqueue(zbd_wq);
 out_destroy_bvec_cache:
@@ -1995,6 +2002,7 @@ static void __exit nvmet_exit(void)
 	ida_destroy(&cntlid_ida);
 	destroy_workqueue(nvmet_wq);
 	destroy_workqueue(buffered_io_wq);
+	destroy_workqueue(verify_wq);
 	destroy_workqueue(zbd_wq);
 	kmem_cache_destroy(nvmet_bvec_cache);
 

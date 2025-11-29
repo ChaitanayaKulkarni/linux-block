@@ -455,6 +455,7 @@ struct nvmet_req {
 	union {
 		struct {
 			struct bio      inline_bio;
+			struct work_struct      work;
 		} b;
 		struct {
 			bool			mpool_alloc;
@@ -499,6 +500,7 @@ struct nvmet_req {
 #define NVMET_MAX_MPOOL_BVEC		16
 extern struct kmem_cache *nvmet_bvec_cache;
 extern struct workqueue_struct *buffered_io_wq;
+extern struct workqueue_struct *verify_wq;
 extern struct workqueue_struct *zbd_wq;
 extern struct workqueue_struct *nvmet_wq;
 
