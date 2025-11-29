@@ -1106,6 +1106,43 @@ static blk_status_t sd_setup_write_zeroes_cmnd(struct scsi_cmnd *cmd)
 	return sd_setup_write_same10_cmnd(cmd, false);
 }
 
+static blk_status_t sd_setup_verify_cmnd(struct scsi_cmnd *cmd)
+{
+	struct request *rq = scsi_cmd_to_rq(cmd);
+	struct scsi_device *sdp = cmd->device;
+	struct scsi_disk *sdkp = scsi_disk(rq->q->disk);
+	unsigned int mask = logical_to_sectors(sdp, 1) - 1;
+	u64 lba = sectors_to_logical(sdp, blk_rq_pos(rq));
+	u32 nr_blocks = sectors_to_logical(sdp, blk_rq_sectors(rq));
+
+	if (!sdkp->verify_16)
+		return BLK_STS_NOTSUPP;
+
+	if (blk_rq_pos(rq) + blk_rq_sectors(rq) > get_capacity(rq->q->disk)) {
+		scmd_printk(KERN_ERR, cmd, "access beyond end of device\n");
+		return BLK_STS_IOERR;
+	}
+
+	if ((blk_rq_pos(rq) & mask) || (blk_rq_sectors(rq) & mask)) {
+		scmd_printk(KERN_ERR, cmd,
+			    "request not aligned to the logical block size\n");
+		return BLK_STS_IOERR;
+	}
+
+	memset(&cmd->sdb, 0, sizeof(cmd->sdb));
+	cmd->cmd_len = 16;
+	memset(cmd->cmnd, 0, cmd->cmd_len);
+	cmd->cmnd[0] = VERIFY_16;
+	put_unaligned_be64(lba, &cmd->cmnd[2]);
+	put_unaligned_be32(nr_blocks, &cmd->cmnd[10]);
+
+	cmd->allowed = sdkp->max_retries;
+	cmd->sc_data_direction = DMA_NONE;
+	cmd->transfersize = 0;
+
+	return BLK_STS_OK;
+}
+
 static void sd_disable_write_same(struct scsi_disk *sdkp)
 {
 	sdkp->device->no_write_same = 1;
@@ -1176,6 +1213,45 @@ out:
 	    sdkp->zeroing_mode == SD_ZERO_WS10_UNMAP)
 		lim->max_hw_wzeroes_unmap_sectors =
 				lim->max_write_zeroes_sectors;
+}
+
+static void sd_config_verify(struct scsi_disk *sdkp, struct queue_limits *lim)
+{
+	sector_t lb_sectors;
+	sector_t max_lb;
+
+	if (!sdkp->verify_16) {
+		lim->max_verify_sectors = 0;
+		return;
+	}
+
+	lb_sectors = logical_to_sectors(sdkp->device, 1);
+	if (!lb_sectors) {
+		lim->max_verify_sectors = 0;
+		return;
+	}
+
+	max_lb = logical_to_sectors(sdkp->device, (sector_t)0xffffffff);
+
+	/*
+	 * Don't allow verify to bypass queue limits or we'd create multi-minute
+	 * commands on large HDDs and spuriously time them out.  Honor both the
+	 * hardware maximum and the effective queue limit (with zero meaning
+	 * "no restriction").
+	 */
+	max_lb = min_not_zero(max_lb, (sector_t)lim->max_hw_sectors);
+	max_lb = min_t(sector_t, max_lb, (sector_t)lim->max_sectors);
+	max_lb = min_t(sector_t, max_lb, (sector_t)UINT_MAX);
+	lim->max_verify_sectors = round_down(max_lb, lb_sectors);
+}
+
+static void sd_disable_verify(struct scsi_disk *sdkp)
+{
+	struct request_queue *q = sdkp->disk->queue;
+
+	sdkp->verify_16 = 0;
+	if (q)
+		q->limits.max_verify_sectors = 0;
 }
 
 static blk_status_t sd_setup_flush_cmnd(struct scsi_cmnd *cmd)
@@ -1481,6 +1557,8 @@ static blk_status_t sd_init_command(struct scsi_cmnd *cmd)
 		}
 	case REQ_OP_WRITE_ZEROES:
 		return sd_setup_write_zeroes_cmnd(cmd);
+	case REQ_OP_VERIFY:
+		return sd_setup_verify_cmnd(cmd);
 	case REQ_OP_FLUSH:
 		return sd_setup_flush_cmnd(cmd);
 	case REQ_OP_READ:
@@ -2330,6 +2408,7 @@ static int sd_done(struct scsi_cmnd *SCpnt)
 	switch (req_op(req)) {
 	case REQ_OP_DISCARD:
 	case REQ_OP_WRITE_ZEROES:
+	case REQ_OP_VERIFY:
 	case REQ_OP_ZONE_RESET:
 	case REQ_OP_ZONE_RESET_ALL:
 	case REQ_OP_ZONE_OPEN:
@@ -2411,6 +2490,10 @@ static int sd_done(struct scsi_cmnd *SCpnt)
 					sd_disable_write_same(sdkp);
 					req->rq_flags |= RQF_QUIET;
 				}
+				break;
+			case VERIFY_16:
+				sd_disable_verify(sdkp);
+				req->rq_flags |= RQF_QUIET;
 				break;
 			}
 		}
@@ -3521,6 +3604,18 @@ static void sd_read_write_same(struct scsi_disk *sdkp, unsigned char *buffer)
 		sdkp->ws10 = 1;
 }
 
+static void sd_read_verify(struct scsi_disk *sdkp, unsigned char *buffer)
+{
+	struct scsi_device *sdev = sdkp->device;
+	int ret;
+
+	sdkp->verify_16 = 1;
+
+	ret = scsi_report_opcode(sdev, buffer, SD_BUF_SIZE, VERIFY_16, 0);
+	if (ret <= 0)
+		sdkp->verify_16 = 0;
+}
+
 static void sd_read_security(struct scsi_disk *sdkp, unsigned char *buffer)
 {
 	struct scsi_device *sdev = sdkp->device;
@@ -3801,6 +3896,7 @@ static void sd_revalidate_disk(struct gendisk *disk)
 		sd_read_io_hints(sdkp, buffer);
 		sd_read_app_tag_own(sdkp, buffer);
 		sd_read_write_same(sdkp, buffer);
+		sd_read_verify(sdkp, buffer);
 		sd_read_security(sdkp, buffer);
 		sd_config_protection(sdkp, lim);
 	}
@@ -3838,6 +3934,7 @@ static void sd_revalidate_disk(struct gendisk *disk)
 
 	set_capacity_and_notify(disk, logical_to_sectors(sdp, sdkp->capacity));
 	sd_config_write_same(sdkp, lim);
+	sd_config_verify(sdkp, lim);
 
 	err = queue_limits_commit_update_frozen(sdkp->disk->queue, lim);
 	if (err)
