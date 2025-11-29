@@ -102,6 +102,7 @@ struct nullb_device {
 	bool power; /* power on/off the device */
 	bool memory_backed; /* if data is stored in memory */
 	bool discard; /* if support discard */
+	bool verify; /* if support verify */
 	bool zoned; /* if device is zoned */
 	bool zone_full; /* Initialize zones to be full */
 	bool virt_boundary; /* virtual boundary on/off for the device */

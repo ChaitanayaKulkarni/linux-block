@@ -270,6 +270,10 @@ static bool g_rotational;
 module_param_named(rotational, g_rotational, bool, S_IRUGO);
 MODULE_PARM_DESC(rotational, "Set the rotational feature for the device. Default: false");
 
+static bool g_verify;
+module_param_named(verify, g_verify, bool, 0444);
+MODULE_PARM_DESC(verify, "Allow verify processing. Default: false");
+
 static struct nullb_device *null_alloc_dev(void);
 static void null_free_dev(struct nullb_device *dev);
 static void null_del_dev(struct nullb *nullb);
@@ -457,6 +461,7 @@ NULLB_DEVICE_ATTR(blocking, bool, NULL);
 NULLB_DEVICE_ATTR(use_per_node_hctx, bool, NULL);
 NULLB_DEVICE_ATTR(memory_backed, bool, NULL);
 NULLB_DEVICE_ATTR(discard, bool, NULL);
+NULLB_DEVICE_ATTR(verify, bool, NULL);
 NULLB_DEVICE_ATTR(mbps, uint, NULL);
 NULLB_DEVICE_ATTR(cache_size, ulong, NULL);
 NULLB_DEVICE_ATTR(zoned, bool, NULL);
@@ -602,6 +607,7 @@ static struct configfs_attribute *nullb_device_attrs[] = {
 	&nullb_device_attr_cache_size,
 	&nullb_device_attr_completion_nsec,
 	&nullb_device_attr_discard,
+	&nullb_device_attr_verify,
 	&nullb_device_attr_fua,
 	&nullb_device_attr_home_node,
 	&nullb_device_attr_hw_queue_depth,
@@ -800,6 +806,7 @@ static struct nullb_device *null_alloc_dev(void)
 	dev->blocking = g_blocking;
 	dev->memory_backed = g_memory_backed;
 	dev->discard = g_discard;
+	dev->verify = g_verify;
 	dev->cache_size = g_cache_size;
 	dev->mbps = g_mbps;
 	dev->use_per_node_hctx = g_use_per_node_hctx;
@@ -1420,6 +1427,9 @@ blk_status_t null_process_cmd(struct nullb_cmd *cmd, enum req_op op,
 	if (dev->badblocks.shift != -1)
 		badblocks_ret = null_handle_badblocks(cmd, sector, &nr_sectors);
 
+	if (op == REQ_OP_VERIFY)
+		return BLK_STS_OK;
+
 	if (dev->memory_backed && nr_sectors) {
 		ret = null_handle_memory_backed(cmd, op, sector, nr_sectors);
 		if (ret != BLK_STS_OK)
@@ -1796,6 +1806,14 @@ static void null_config_discard(struct nullb *nullb, struct queue_limits *lim)
 	lim->max_hw_discard_sectors = UINT_MAX >> 9;
 }
 
+static void null_config_verify(struct nullb *nullb, struct queue_limits *lim)
+{
+	if (!nullb->dev->verify)
+		return;
+
+	lim->max_verify_sectors = UINT_MAX >> 9;
+}
+
 static const struct block_device_operations null_ops = {
 	.owner		= THIS_MODULE,
 	.report_zones	= null_report_zones,
@@ -1980,6 +1998,7 @@ static int null_add_dev(struct nullb_device *dev)
 	if (dev->virt_boundary)
 		lim.virt_boundary_mask = PAGE_SIZE - 1;
 	null_config_discard(nullb, &lim);
+	null_config_verify(nullb, &lim);
 	if (dev->zoned) {
 		rv = null_init_zoned_dev(dev, &lim);
 		if (rv)
