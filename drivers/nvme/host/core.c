@@ -957,6 +957,52 @@ static inline blk_status_t nvme_setup_write_zeroes(struct nvme_ns *ns,
 	return BLK_STS_OK;
 }
 
+static inline blk_status_t nvme_setup_verify(struct nvme_ns *ns,
+		struct request *req, struct nvme_command *cmnd)
+{
+	u16 control = 0;
+
+	memset(cmnd, 0, sizeof(*cmnd));
+
+	cmnd->verify.opcode = nvme_cmd_verify;
+	cmnd->verify.nsid = cpu_to_le32(ns->head->ns_id);
+	cmnd->verify.slba =
+		cpu_to_le64(nvme_sect_to_lba(ns->head, blk_rq_pos(req)));
+	cmnd->verify.length =
+		cpu_to_le16((blk_rq_bytes(req) >> ns->head->lba_shift) - 1);
+
+	/*
+	 * Verify is effectively a read that throws away the data, so it needs
+	 * the same PI control bits we use in nvme_setup_rw().  If we omit the
+	 * PRCHK flags when ns is formatted with pi the controller never
+	 * compares guard/ref/app tags even though the fallback READ path would
+	 * catch those integrity errors. This is the main difference from
+	 * write-zeroes.
+	 */
+	if (ns->head->ms) {
+		if (!blk_integrity_rq(req)) {
+			if (WARN_ON_ONCE(!nvme_ns_has_pi(ns->head)))
+				return BLK_STS_NOTSUPP;
+			control |= NVME_RW_PRINFO_PRACT;
+			nvme_set_ref_tag(ns, cmnd, req);
+		}
+
+		if (bio_integrity_flagged(req->bio, BIP_CHECK_GUARD))
+			control |= NVME_RW_PRINFO_PRCHK_GUARD;
+		if (bio_integrity_flagged(req->bio, BIP_CHECK_REFTAG)) {
+			control |= NVME_RW_PRINFO_PRCHK_REF;
+			nvme_set_ref_tag(ns, cmnd, req);
+		}
+		if (bio_integrity_flagged(req->bio, BIP_CHECK_APPTAG)) {
+			control |= NVME_RW_PRINFO_PRCHK_APP;
+			nvme_set_app_tag(req, cmnd);
+		}
+	}
+
+	cmnd->verify.control = cpu_to_le16(control);
+	return BLK_STS_OK;
+}
+
 /*
  * NVMe does not support a dedicated command to issue an atomic write. A write
  * which does adhere to the device atomic limits will silently be executed
@@ -1109,6 +1155,9 @@ blk_status_t nvme_setup_cmd(struct nvme_ns *ns, struct request *req)
 		break;
 	case REQ_OP_WRITE_ZEROES:
 		ret = nvme_setup_write_zeroes(ns, req, cmd);
+		break;
+	case REQ_OP_VERIFY:
+		ret = nvme_setup_verify(ns, req, cmd);
 		break;
 	case REQ_OP_DISCARD:
 		ret = nvme_setup_discard(ns, req, cmd);
@@ -2123,6 +2172,7 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
 		lim->max_write_zeroes_sectors = UINT_MAX;
 	else
 		lim->max_write_zeroes_sectors = ns->ctrl->max_zeroes_sectors;
+	lim->max_verify_sectors = ns->ctrl->max_verify_sectors;
 	return valid;
 }
 
@@ -3372,6 +3422,11 @@ static int nvme_init_non_mdts_limits(struct nvme_ctrl *ctrl)
 		ctrl->max_zeroes_sectors = ctrl->max_hw_sectors;
 	else
 		ctrl->max_zeroes_sectors = 0;
+
+	if (ctrl->oncs & NVME_CTRL_ONCS_VERIFY)
+		ctrl->max_verify_sectors = ctrl->max_hw_sectors;
+	else
+		ctrl->max_verify_sectors = 0;
 
 	if (!nvme_is_io_ctrl(ctrl) ||
 	    !nvme_id_cns_ok(ctrl, NVME_ID_CNS_CS_CTRL) ||
@@ -5342,6 +5397,7 @@ static inline void _nvme_check_size(void)
 	BUILD_BUG_ON(sizeof(struct nvme_format_cmd) != 64);
 	BUILD_BUG_ON(sizeof(struct nvme_dsm_cmd) != 64);
 	BUILD_BUG_ON(sizeof(struct nvme_write_zeroes_cmd) != 64);
+	BUILD_BUG_ON(sizeof(struct nvme_verify_cmd) != 64);
 	BUILD_BUG_ON(sizeof(struct nvme_abort_cmd) != 64);
 	BUILD_BUG_ON(sizeof(struct nvme_get_log_page_command) != 64);
 	BUILD_BUG_ON(sizeof(struct nvme_command) != 64);
