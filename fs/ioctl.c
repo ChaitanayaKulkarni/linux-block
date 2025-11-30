@@ -479,6 +479,75 @@ static int ioctl_get_fs_sysfs_path(struct file *file, void __user *argp)
 	return copy_to_user(argp, &u, sizeof(u)) ? -EFAULT : 0;
 }
 
+/**
+ * ioctl_verify_range - handle FS_IOC_VERIFY_RANGE ioctl
+ * @file: file to verify
+ * @argp: pointer to userspace fsverify_range structure
+ *
+ * Verifies that the file’s data blocks can be read from the underlying media.
+ * Uses hardware verify commands (NVMe VERIFY, SCSI VERIFY) when available and
+ * otherwise falls back to regular reads to trigger the same behaviour.
+ *
+ * Returns 0 on success, negative errno on failure.
+ */
+static int ioctl_verify_range(struct file *file, void __user *argp)
+{
+	struct inode *inode = file_inode(file);
+	struct fsverify_range r;
+	loff_t isize;
+
+	if (copy_from_user(&r, argp, sizeof(r)))
+		return -EFAULT;
+
+	/* Reserved field must be zero */
+	if (r.reserved)
+		return -EINVAL;
+
+	/* Validate flags */
+	if (r.flags & ~FSVERIFY_RANGE_NOFALLBACK)
+		return -EINVAL;
+
+	/* Must be a regular file */
+	if (!S_ISREG(inode->i_mode))
+		return -EINVAL;
+
+	/* Filesystem must implement verify_range */
+	if (!file->f_op->verify_range)
+		return -EOPNOTSUPP;
+
+	/* Only need read permission - verify doesn't modify data */
+	if (!(file->f_mode & FMODE_READ))
+		return -EBADF;
+
+	/* Validate offset */
+	isize = i_size_read(inode);
+	if (r.offset > isize)
+		return -EINVAL;
+
+	/* len = 0 means verify to end of file */
+	if (r.len == 0)
+		r.len = isize - r.offset;
+
+	/*
+	 * Clamp len to file size, avoiding integer overflow.
+	 * We cannot use (r.offset + r.len > isize) because the addition can
+	 * overflow when r.offset + r.len exceeds LOFF_MAX, causing the check
+	 * to incorrectly pass. For example, offset=LOFF_MAX-100 and len=200
+	 * would overflow to 99, appearing less than isize.
+	 *
+	 * Since we already verified r.offset <= isize above, the subtraction
+	 * (isize - r.offset) cannot underflow, making this safe.
+	 */
+	if (r.len > isize - r.offset)
+		r.len = isize - r.offset;
+
+	/* Nothing to verify */
+	if (r.len == 0)
+		return 0;
+
+	return file->f_op->verify_range(file, r.offset, r.len, r.flags);
+}
+
 /*
  * do_vfs_ioctl() is not for drivers and not intended to be EXPORT_SYMBOL()'d.
  * It's just a simple helper for sys_ioctl and compat_sys_ioctl.
@@ -570,6 +639,9 @@ static int do_vfs_ioctl(struct file *filp, unsigned int fd,
 
 	case FS_IOC_GETFSSYSFSPATH:
 		return ioctl_get_fs_sysfs_path(filp, argp);
+
+	case FS_IOC_VERIFY_RANGE:
+		return ioctl_verify_range(filp, argp);
 
 	default:
 		if (S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))

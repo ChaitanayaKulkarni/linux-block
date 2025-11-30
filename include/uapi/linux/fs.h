@@ -85,6 +85,20 @@ struct fstrim_range {
 };
 
 /*
+ * Structure for FS_IOC_VERIFY_RANGE ioctl.
+ * Used to verify that file data blocks can be read from storage media.
+ */
+struct fsverify_range {
+	__u64 offset;		/* starting offset in bytes */
+	__u64 len;		/* length in bytes, 0 means to EOF */
+	__u32 flags;		/* FSVERIFY_RANGE_* flags */
+	__u32 reserved;		/* must be zero */
+};
+
+/* Flags for FS_IOC_VERIFY_RANGE */
+#define FSVERIFY_RANGE_NOFALLBACK	(1 << 0)  /* fail if no hw verify */
+
+/*
  * We include a length field because some filesystems (vfat) have an identifier
  * that we do want to expose as a UUID, but doesn't have the standard length.
  *
@@ -309,6 +323,7 @@ struct file_attr {
 #define FIFREEZE	_IOWR('X', 119, int)	/* Freeze */
 #define FITHAW		_IOWR('X', 120, int)	/* Thaw */
 #define FITRIM		_IOWR('X', 121, struct fstrim_range)	/* Trim */
+#define FS_IOC_VERIFY_RANGE	_IOW('X', 63, struct fsverify_range)	/* Verify */
 #define FICLONE		_IOW(0x94, 9, int)
 #define FICLONERANGE	_IOW(0x94, 13, struct file_clone_range)
 #define FIDEDUPERANGE	_IOWR(0x94, 54, struct file_dedupe_range)
