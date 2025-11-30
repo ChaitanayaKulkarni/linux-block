@@ -1525,6 +1525,43 @@ xfs_file_fadvise(
 	return ret;
 }
 
+/*
+ * Verify that file data blocks are readable on the underlying storage media.
+ * Uses hardware verify commands (NVMe Verify, SCSI VERIFY) when available,
+ * falling back to actual reads otherwise.
+ */
+STATIC int
+xfs_file_verify_range(
+	struct file		*file,
+	loff_t			offset,
+	loff_t			len,
+	unsigned int		flags)
+{
+	struct xfs_inode	*ip = XFS_I(file_inode(file));
+	int			error;
+
+	/*
+	 * FS_IOC_VERIFY_RANGE behaves like a read, so bump atime to
+	 * preserve normal relatime/stat consistency for observers.
+	 */
+	file_accessed(file);
+
+	if (xfs_is_shutdown(ip->i_mount))
+		return -EIO;
+
+	/*
+	 * Take shared iolock to prevent truncation/hole punch during
+	 * extent iteration. We don't need exclusive lock since verify
+	 * is a read-like operation.
+	 */
+	xfs_ilock(ip, XFS_IOLOCK_SHARED);
+	error = iomap_file_verify(VFS_I(ip), offset, len,
+				  &xfs_read_iomap_ops, flags);
+	xfs_iunlock(ip, XFS_IOLOCK_SHARED);
+
+	return error;
+}
+
 STATIC loff_t
 xfs_file_remap_range(
 	struct file		*file_in,
@@ -2003,6 +2040,7 @@ const struct file_operations xfs_file_operations = {
 	.get_unmapped_area = thp_get_unmapped_area,
 	.fallocate	= xfs_file_fallocate,
 	.fadvise	= xfs_file_fadvise,
+	.verify_range	= xfs_file_verify_range,
 	.remap_file_range = xfs_file_remap_range,
 	.fop_flags	= FOP_MMAP_SYNC | FOP_BUFFER_RASYNC |
 			  FOP_BUFFER_WASYNC | FOP_DIO_PARALLEL_WRITE |
