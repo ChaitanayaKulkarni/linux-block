@@ -960,6 +960,34 @@ loff_t ext4_llseek(struct file *file, loff_t offset, int whence)
 	return vfs_setpos(file, offset, maxbytes);
 }
 
+/*
+ * Verify that file data blocks are readable on the underlying storage media.
+ * Uses hardware verify commands (NVMe Verify, SCSI VERIFY) when available,
+ * falling back to actual reads otherwise.
+ */
+static int ext4_file_verify_range(struct file *file, loff_t offset,
+				  loff_t len, unsigned int flags)
+{
+	struct inode *inode = file_inode(file);
+	int ret;
+
+	if (ext4_forced_shutdown(inode->i_sb))
+		return -EIO;
+
+	/*
+	 * FS_IOC_VERIFY_RANGE behaves like a read, so bump atime to
+	 * preserve normal relatime/stat consistency for observers.
+	 */
+	file_accessed(file);
+
+	/* Take shared lock to prevent truncation during extent iteration */
+	inode_lock_shared(inode);
+	ret = iomap_file_verify(inode, offset, len, &ext4_iomap_ops, flags);
+	inode_unlock_shared(inode);
+
+	return ret;
+}
+
 const struct file_operations ext4_file_operations = {
 	.llseek		= ext4_llseek,
 	.read_iter	= ext4_file_read_iter,
@@ -977,6 +1005,7 @@ const struct file_operations ext4_file_operations = {
 	.splice_read	= ext4_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 	.fallocate	= ext4_fallocate,
+	.verify_range	= ext4_file_verify_range,
 	.fop_flags	= FOP_MMAP_SYNC | FOP_BUFFER_RASYNC |
 			  FOP_DIO_PARALLEL_WRITE |
 			  FOP_DONTCACHE,
