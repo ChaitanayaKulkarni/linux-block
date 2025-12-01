@@ -281,6 +281,94 @@ static int lo_req_flush(struct loop_device *lo, struct request *rq)
 	return ret;
 }
 
+/*
+ * Emulate verify for file-backed loop using direct I/O reads.
+ * A single folio is allocated and reused for each read chunk.
+ */
+static int lo_verify_file_emulate(struct loop_device *lo, struct file *file,
+				  loff_t pos, ssize_t len)
+{
+	struct folio *folio;
+	struct bio_vec bvec;
+	struct iov_iter iter;
+	struct kiocb iocb;
+	ssize_t ret;
+
+	folio = folio_alloc(GFP_NOIO, 0);
+	if (!folio)
+		return -ENOMEM;
+
+	while (len > 0) {
+		ssize_t chunk = min_t(ssize_t, len, folio_size(folio));
+
+		bvec_set_folio(&bvec, folio, chunk, 0);
+		iov_iter_bvec(&iter, ITER_DEST, &bvec, 1, chunk);
+
+		init_sync_kiocb(&iocb, file);
+		iocb.ki_pos = pos;
+		iocb.ki_flags |= IOCB_DIRECT;
+
+		ret = file->f_op->read_iter(&iocb, &iter);
+		if (ret < 0)
+			goto out;
+		if (ret != chunk) {
+			ret = -EIO;
+			goto out;
+		}
+		/*
+		 * Just in case filesystems clear IOCB_DIRECT and fall back to
+		 * buffered IO. e.g. if the operation being performed on the
+		 * inode is not supported by direct I/O (ext4).
+		 */
+		if (!(iocb.ki_flags & IOCB_DIRECT)) {
+			ret = -EOPNOTSUPP;
+			goto out;
+		}
+
+		pos += chunk;
+		len -= chunk;
+		cond_resched();
+	}
+	ret = 0;
+out:
+	folio_put(folio);
+	return ret;
+}
+
+/*
+ * Handle REQ_OP_VERIFY for loop devices.
+ *
+ * Block-backed: forward to backing block device via blkdev_issue_verify()
+ *               which handles hardware verify or read fallback automatically.
+ *
+ * File-backed:  use filesystem's verify_range if available (XFS, ext4),
+ *               otherwise emulate with direct I/O reads.
+ */
+static int lo_verify(struct loop_device *lo, struct request *rq, loff_t pos)
+{
+	struct file *file = lo->lo_backing_file;
+	struct inode *inode = file->f_mapping->host;
+	ssize_t len = blk_rq_bytes(rq);
+
+	/* Block-backed: forward to backing block device */
+	if (S_ISBLK(inode->i_mode)) {
+		return blkdev_issue_verify(I_BDEV(inode),
+					   pos >> SECTOR_SHIFT,
+					   len >> SECTOR_SHIFT,
+					   GFP_NOIO, 0);
+	}
+
+	/* File-backed: use filesystem's verify_range if available */
+	if (file->f_op->verify_range)
+		return file->f_op->verify_range(file, pos, len, 0);
+
+	/* Emulate with direct I/O reads - buffered would only verify cache */
+	if (!(lo->lo_flags & LO_FLAGS_DIRECT_IO))
+		return -EOPNOTSUPP;
+
+	return lo_verify_file_emulate(lo, file, pos, len);
+}
+
 static void lo_complete_rq(struct request *rq)
 {
 	struct loop_cmd *cmd = blk_mq_rq_to_pdu(rq);
@@ -434,6 +522,8 @@ static int do_req_filebacked(struct loop_device *lo, struct request *rq)
 		return lo_rw_aio(lo, cmd, pos, ITER_SOURCE);
 	case REQ_OP_READ:
 		return lo_rw_aio(lo, cmd, pos, ITER_DEST);
+	case REQ_OP_VERIFY:
+		return lo_verify(lo, rq, pos);
 	default:
 		WARN_ON_ONCE(1);
 		return -EIO;
@@ -945,6 +1035,34 @@ static unsigned int loop_default_blocksize(struct loop_device *lo)
 	return SECTOR_SIZE;
 }
 
+/*
+ * Configure verify limits based on backing store type.
+ *
+ * Block-backed: inherit verify capability from backing device.
+ * File-backed:  enable if filesystem supports verify_range or DIO is possible.
+ */
+static void loop_config_verify(struct loop_device *lo, struct queue_limits *lim,
+			       struct block_device *backing_bdev)
+{
+	struct file *file = lo->lo_backing_file;
+	struct inode *inode = file->f_mapping->host;
+
+	/* Block-backed: inherit from backing device */
+	if (S_ISBLK(inode->i_mode) && backing_bdev) {
+		lim->max_verify_sectors = bdev_verify_sectors(backing_bdev);
+		return;
+	}
+
+	/*
+	 * File-backed: enable verify if filesystem supports verify_range
+	 * (XFS, ext4) or if direct I/O is available for read-based emulation.
+	 */
+	if (file->f_op->verify_range || (lo->lo_flags & LO_FLAGS_DIRECT_IO))
+		lim->max_verify_sectors = UINT_MAX >> SECTOR_SHIFT;
+	else
+		lim->max_verify_sectors = 0;
+}
+
 static void loop_update_limits(struct loop_device *lo, struct queue_limits *lim,
 		unsigned int bsize)
 {
@@ -977,6 +1095,8 @@ static void loop_update_limits(struct loop_device *lo, struct queue_limits *lim,
 		lim->discard_granularity = granularity;
 	else
 		lim->discard_granularity = 0;
+
+	loop_config_verify(lo, lim, backing_bdev);
 }
 
 static int loop_configure(struct loop_device *lo, blk_mode_t mode,
