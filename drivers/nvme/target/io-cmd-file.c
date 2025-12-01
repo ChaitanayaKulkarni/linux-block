@@ -360,6 +360,112 @@ static void nvmet_file_execute_write_zeroes(struct nvmet_req *req)
 	queue_work(nvmet_wq, &req->f.work);
 }
 
+/*
+ * Emulate verify for file-backed namespace using direct I/O reads.
+ * A single folio is allocated and reused for each read chunk.
+ */
+static int nvmet_file_verify_emulate(struct nvmet_req *req, loff_t pos,
+			      ssize_t len)
+{
+	unsigned int blksize_shift = req->ns->blksize_shift;
+	struct file *file = req->ns->file;
+	struct folio *folio;
+	struct bio_vec bvec;
+	struct iov_iter iter;
+	struct kiocb iocb;
+	ssize_t ret;
+
+	folio = folio_alloc(GFP_KERNEL, 0);
+	if (!folio)
+		return -ENOMEM;
+
+	while (len > 0) {
+		ssize_t chunk = min_t(ssize_t, len, folio_size(folio));
+
+		bvec_set_folio(&bvec, folio, chunk, 0);
+		iov_iter_bvec(&iter, ITER_DEST, &bvec, 1, chunk);
+
+		init_sync_kiocb(&iocb, file);
+		iocb.ki_pos = pos;
+		iocb.ki_flags |= IOCB_DIRECT;
+
+		ret = file->f_op->read_iter(&iocb, &iter);
+		if (ret < 0) {
+			req->error_slba = pos >> blksize_shift;
+			goto out;
+		}
+		if (ret != chunk) {
+			req->error_slba = (pos + ret) >> blksize_shift;
+			ret = -EIO;
+			goto out;
+		}
+		/*
+		 * Just in case filesystems clear IOCB_DIRECT and fall back to
+		 * buffered IO. e.g. if the operation being performed on the
+		 * inode is not supported by direct I/O (ext4).
+		 */
+		if (!(iocb.ki_flags & IOCB_DIRECT)) {
+			req->error_slba = pos >> blksize_shift;
+			ret = -EOPNOTSUPP;
+			goto out;
+		}
+
+		pos += chunk;
+		len -= chunk;
+		cond_resched();
+	}
+	ret = 0;
+out:
+	folio_put(folio);
+	return ret;
+}
+
+static void nvmet_file_verify_work(struct work_struct *w)
+{
+	struct nvmet_req *req = container_of(w, struct nvmet_req, f.work);
+	struct nvme_verify_cmd *verify = &req->cmd->verify;
+	struct file *file = req->ns->file;
+	u64 start_slba = le64_to_cpu(verify->slba);
+	loff_t offset;
+	ssize_t len;
+	int ret;
+
+	offset = start_slba << req->ns->blksize_shift;
+	len = (((sector_t)le16_to_cpu(verify->length) + 1) <<
+			req->ns->blksize_shift);
+
+	if (unlikely(offset + len > req->ns->size)) {
+		req->error_slba = start_slba;
+		nvmet_req_complete(req, errno_to_nvme_status(req, -ENOSPC));
+		return;
+	}
+
+	/* Use filesystem's verify_range if available (XFS, ext4) */
+	if (file->f_op->verify_range) {
+		ret = file->f_op->verify_range(file, offset, len, 0);
+		if (ret)
+			req->error_slba = start_slba;
+	} else
+		ret = nvmet_file_verify_emulate(req, offset, len);
+
+	nvmet_req_complete(req, errno_to_nvme_status(req, ret));
+}
+
+static void nvmet_file_execute_verify(struct nvmet_req *req)
+{
+	if (!nvmet_check_transfer_len(req, 0))
+		return;
+
+	if (req->ns->buffered_io) {
+		req->error_slba = le64_to_cpu(req->cmd->verify.slba);
+		nvmet_req_complete(req, errno_to_nvme_status(req, -EOPNOTSUPP));
+		return;
+	}
+
+	INIT_WORK(&req->f.work, nvmet_file_verify_work);
+	queue_work(verify_wq, &req->f.work);
+}
+
 u16 nvmet_file_parse_io_cmd(struct nvmet_req *req)
 {
 	switch (req->cmd->common.opcode) {
@@ -375,6 +481,9 @@ u16 nvmet_file_parse_io_cmd(struct nvmet_req *req)
 		return 0;
 	case nvme_cmd_write_zeroes:
 		req->execute = nvmet_file_execute_write_zeroes;
+		return 0;
+	case nvme_cmd_verify:
+		req->execute = nvmet_file_execute_verify;
 		return 0;
 	default:
 		return nvmet_report_invalid_opcode(req);
