@@ -427,7 +427,7 @@ struct bio *bio_split_zone_append(struct bio *bio,
 	return bio_submit_split(bio, split_sectors);
 }
 
-struct bio *bio_split_write_zeroes(struct bio *bio,
+static struct bio *bio_split_payloadless_max_sectors(struct bio *bio,
 		const struct queue_limits *lim, unsigned *nsegs)
 {
 	unsigned int max_sectors = get_max_io_size(bio, lim);
@@ -445,6 +445,12 @@ struct bio *bio_split_write_zeroes(struct bio *bio,
 	if (bio_sectors(bio) <= max_sectors)
 		return bio;
 	return bio_submit_split(bio, max_sectors);
+}
+
+struct bio *bio_split_write_zeroes(struct bio *bio,
+		const struct queue_limits *lim, unsigned *nsegs)
+{
+	return bio_split_payloadless_max_sectors(bio, lim, nsegs);
 }
 
 /**

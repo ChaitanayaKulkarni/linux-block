@@ -112,6 +112,37 @@ static sector_t bio_write_zeroes_limit(struct block_device *bdev)
 }
 
 /*
+ * Allocate a bio for payloadless operations that don't transfer data, such as
+ * REQ_OP_WRITE_ZEROES or REQ_OP_VERIFY. The bio carries only sector range
+ * information and no data pages.
+ */
+static struct bio *blk_alloc_payloadless_bio(struct block_device *bdev,
+		sector_t *sector, sector_t *nr_sects, sector_t max_sectors,
+		enum req_op op, gfp_t gfp_mask)
+{
+	sector_t len;
+	struct bio *bio;
+
+	if (!*nr_sects)
+		return NULL;
+
+	len = min(*nr_sects, max_sectors);
+
+	bio = bio_alloc(bdev, 0, op, gfp_mask);
+	if (!bio)
+		return NULL;
+
+	bio->bi_iter.bi_sector = *sector;
+	bio->bi_iter.bi_size = len << SECTOR_SHIFT;
+
+	*sector += len;
+	*nr_sects -= len;
+
+	cond_resched();
+	return bio;
+}
+
+/*
  * There is no reliable way for the SCSI subsystem to determine whether a
  * device supports a WRITE SAME operation without actually performing a write
  * to media. As a result, write_zeroes is enabled by default and will be
@@ -122,26 +153,21 @@ static void __blkdev_issue_write_zeroes(struct block_device *bdev,
 		sector_t sector, sector_t nr_sects, gfp_t gfp_mask,
 		struct bio **biop, unsigned flags, sector_t limit)
 {
+	struct bio *bio;
 
 	while (nr_sects) {
-		unsigned int len = min(nr_sects, limit);
-		struct bio *bio;
-
 		if ((flags & BLKDEV_ZERO_KILLABLE) &&
 		    fatal_signal_pending(current))
 			break;
 
-		bio = bio_alloc(bdev, 0, REQ_OP_WRITE_ZEROES, gfp_mask);
-		bio->bi_iter.bi_sector = sector;
+		bio = blk_alloc_payloadless_bio(bdev, &sector, &nr_sects, limit,
+				REQ_OP_WRITE_ZEROES, gfp_mask);
+		if (!bio)
+			break;
 		if (flags & BLKDEV_ZERO_NOUNMAP)
 			bio->bi_opf |= REQ_NOUNMAP;
 
-		bio->bi_iter.bi_size = len << SECTOR_SHIFT;
 		*biop = bio_chain_and_submit(*biop, bio);
-
-		nr_sects -= len;
-		sector += len;
-		cond_resched();
 	}
 }
 
