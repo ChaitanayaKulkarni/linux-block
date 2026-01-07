@@ -1925,6 +1925,12 @@ static int device_not_write_zeroes_capable(struct dm_target *ti, struct dm_dev *
 	return b;
 }
 
+static int device_not_verify_capable(struct dm_target *ti, struct dm_dev *dev,
+				      sector_t start, sector_t len, void *data)
+{
+	return !bdev_verify_sectors(dev->bdev);
+}
+
 static bool dm_table_supports_write_zeroes(struct dm_table *t)
 {
 	for (unsigned int i = 0; i < t->num_targets; i++) {
@@ -1935,6 +1941,22 @@ static bool dm_table_supports_write_zeroes(struct dm_table *t)
 
 		if (!ti->type->iterate_devices ||
 		    ti->type->iterate_devices(ti, device_not_write_zeroes_capable, NULL))
+			return false;
+	}
+
+	return true;
+}
+
+static bool dm_table_supports_verify(struct dm_table *t)
+{
+	for (unsigned int i = 0; i < t->num_targets; i++) {
+		struct dm_target *ti = dm_table_get_target(t, i);
+
+		if (!ti->num_verify_bios)
+			return false;
+
+		if (!ti->type->iterate_devices ||
+		    ti->type->iterate_devices(ti, device_not_verify_capable, NULL))
 			return false;
 	}
 
@@ -2076,6 +2098,9 @@ int dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 
 	if (!dm_table_supports_secure_erase(t))
 		limits->max_secure_erase_sectors = 0;
+
+	if (!dm_table_supports_verify(t))
+		limits->max_verify_sectors = 0;
 
 	if (dm_table_supports_flush(t))
 		limits->features |= BLK_FEAT_WRITE_CACHE | BLK_FEAT_FUA;

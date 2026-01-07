@@ -349,6 +349,12 @@ struct dm_target {
 	unsigned int num_write_zeroes_bios;
 
 	/*
+	 * The number of VERIFY bios that will be submitted to the target.
+	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
+	 */
+	unsigned int num_verify_bios;
+
+	/*
 	 * The minimum number of extra bytes allocated in each io for the
 	 * target to use.
 	 */

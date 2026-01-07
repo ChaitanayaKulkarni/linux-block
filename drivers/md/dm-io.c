@@ -325,7 +325,9 @@ static void do_region(const blk_opf_t opf, unsigned int region,
 		special_cmd_max_sectors = bdev_max_discard_sectors(where->bdev);
 	else if (op == REQ_OP_WRITE_ZEROES)
 		special_cmd_max_sectors = q->limits.max_write_zeroes_sectors;
-	if ((op == REQ_OP_DISCARD || op == REQ_OP_WRITE_ZEROES) &&
+	else if (op == REQ_OP_VERIFY)
+		special_cmd_max_sectors = bdev_verify_sectors(where->bdev);
+	if ((op == REQ_OP_DISCARD || op == REQ_OP_WRITE_ZEROES || op == REQ_OP_VERIFY) &&
 	    special_cmd_max_sectors == 0) {
 		atomic_inc(&io->count);
 		dec_count(io, region, BLK_STS_NOTSUPP);
@@ -343,6 +345,7 @@ static void do_region(const blk_opf_t opf, unsigned int region,
 		switch (op) {
 		case REQ_OP_DISCARD:
 		case REQ_OP_WRITE_ZEROES:
+		case REQ_OP_VERIFY:
 			num_bvecs = 0;
 			break;
 		default:
@@ -357,7 +360,7 @@ static void do_region(const blk_opf_t opf, unsigned int region,
 		bio->bi_ioprio = ioprio;
 		store_io_and_region_in_bio(bio, io, region);
 
-		if (op == REQ_OP_DISCARD || op == REQ_OP_WRITE_ZEROES) {
+		if (op == REQ_OP_DISCARD || op == REQ_OP_WRITE_ZEROES || op == REQ_OP_VERIFY) {
 			num_sectors = min_t(sector_t, special_cmd_max_sectors, remaining);
 			bio->bi_iter.bi_size = num_sectors << SECTOR_SHIFT;
 			remaining -= num_sectors;
