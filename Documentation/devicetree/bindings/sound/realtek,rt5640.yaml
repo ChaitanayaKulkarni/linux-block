@@ -137,7 +137,8 @@ properties:
       - 3 # Scale current by 1.5
 
   port:
-    $ref: /schemas/graph.yaml#/properties/port
+    $ref: audio-graph-port.yaml#
+    unevaluatedProperties: false
 
 required:
   - compatible
