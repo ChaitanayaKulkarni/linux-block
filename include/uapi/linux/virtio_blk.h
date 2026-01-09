@@ -40,8 +40,10 @@
 #define VIRTIO_BLK_F_MQ		12	/* support more than one vq */
 #define VIRTIO_BLK_F_DISCARD	13	/* DISCARD is supported */
 #define VIRTIO_BLK_F_WRITE_ZEROES	14	/* WRITE ZEROES is supported */
+/* VIRTIO_BLK_F_LIFETIME	15	   Reserved by spec, not implemented */
 #define VIRTIO_BLK_F_SECURE_ERASE	16 /* Secure Erase is supported */
 #define VIRTIO_BLK_F_ZONED		17	/* Zoned block device */
+#define VIRTIO_BLK_F_VERIFY	18	/* VERIFY is supported */
 
 /* Legacy feature bits */
 #ifndef VIRTIO_BLK_NO_LEGACY
@@ -148,6 +150,10 @@ struct virtio_blk_config {
 		__u8 model;
 		__u8 unused2[3];
 	} zoned;
+
+	/* the next entry is guarded by VIRTIO_BLK_F_VERIFY */
+	/* The maximum verify sectors (in 512-byte sectors). */
+	__virtio32 max_verify_sectors;
 } __attribute__((packed));
 
 /*
@@ -173,8 +179,14 @@ struct virtio_blk_config {
 /* Cache flush command */
 #define VIRTIO_BLK_T_FLUSH	4
 
+/* Verify command (odd number for OUT descriptor direction) */
+#define VIRTIO_BLK_T_VERIFY	7
+
 /* Get device ID command */
 #define VIRTIO_BLK_T_GET_ID    8
+
+/* Get device lifetime command - spec only, not implemented */
+/* #define VIRTIO_BLK_T_GET_LIFETIME 10 */
 
 /* Discard command */
 #define VIRTIO_BLK_T_DISCARD	11
@@ -302,6 +314,16 @@ struct virtio_blk_discard_write_zeroes {
 	__le32 num_sectors;
 	/* flags for this range */
 	__le32 flags;
+};
+
+/* Verify range for VIRTIO_BLK_T_VERIFY requests. */
+struct virtio_blk_verify {
+	/* verify start sector */
+	__le64 sector;
+	/* number of sectors to verify */
+	__le32 num_sectors;
+	/* reserved, must be zero */
+	__le32 reserved;
 };
 
 #ifndef VIRTIO_BLK_NO_LEGACY

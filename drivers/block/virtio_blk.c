@@ -203,6 +203,30 @@ static int virtblk_setup_discard_write_zeroes_erase(struct request *req, bool un
 	return 0;
 }
 
+/*
+ * Setup virtio_blk_verify descriptor for VERIFY requests.
+ * VERIFY is a read-type operation that verifies data integrity without
+ * transferring data to the guest. Uses dedicated descriptor with reserved
+ * field (must be zero, no flags like UNMAP).
+ */
+static int virtblk_setup_verify(struct request *req)
+{
+	struct virtio_blk_verify *range;
+
+	range = kmalloc(sizeof(*range), GFP_ATOMIC);
+	if (!range)
+		return -ENOMEM;
+
+	range->sector = cpu_to_le64(blk_rq_pos(req));
+	range->num_sectors = cpu_to_le32(blk_rq_sectors(req));
+	range->reserved = 0;
+
+	bvec_set_virt(&req->special_vec, range, sizeof(*range));
+	req->rq_flags |= RQF_SPECIAL_PAYLOAD;
+
+	return 0;
+}
+
 static void virtblk_unmap_data(struct request *req, struct virtblk_req *vbr)
 {
 	if (blk_rq_nr_phys_segments(req))
@@ -272,6 +296,9 @@ static blk_status_t virtblk_setup_cmd(struct virtio_device *vdev,
 	case REQ_OP_SECURE_ERASE:
 		type = VIRTIO_BLK_T_SECURE_ERASE;
 		break;
+	case REQ_OP_VERIFY:
+		type = VIRTIO_BLK_T_VERIFY;
+		break;
 	case REQ_OP_ZONE_OPEN:
 		type = VIRTIO_BLK_T_ZONE_OPEN;
 		sector = blk_rq_pos(req);
@@ -315,6 +342,11 @@ static blk_status_t virtblk_setup_cmd(struct virtio_device *vdev,
 	if (type == VIRTIO_BLK_T_DISCARD || type == VIRTIO_BLK_T_WRITE_ZEROES ||
 	    type == VIRTIO_BLK_T_SECURE_ERASE) {
 		if (virtblk_setup_discard_write_zeroes_erase(req, unmap))
+			return BLK_STS_RESOURCE;
+	}
+
+	if (type == VIRTIO_BLK_T_VERIFY) {
+		if (virtblk_setup_verify(req))
 			return BLK_STS_RESOURCE;
 	}
 
@@ -1333,6 +1365,12 @@ static int virtblk_read_limits(struct virtio_blk *vblk,
 		lim->max_write_zeroes_sectors = v ? v : UINT_MAX;
 	}
 
+	if (virtio_has_feature(vdev, VIRTIO_BLK_F_VERIFY)) {
+		virtio_cread(vdev, struct virtio_blk_config,
+			     max_verify_sectors, &v);
+		lim->max_verify_sectors = v ? v : UINT_MAX;
+	}
+
 	/* The discard and secure erase limits are combined since the Linux
 	 * block layer uses the same limit for both commands.
 	 *
@@ -1661,7 +1699,7 @@ static unsigned int features_legacy[] = {
 	VIRTIO_BLK_F_RO, VIRTIO_BLK_F_BLK_SIZE,
 	VIRTIO_BLK_F_FLUSH, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_CONFIG_WCE,
 	VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_WRITE_ZEROES,
-	VIRTIO_BLK_F_SECURE_ERASE,
+	VIRTIO_BLK_F_VERIFY, VIRTIO_BLK_F_SECURE_ERASE,
 }
 ;
 static unsigned int features[] = {
@@ -1669,7 +1707,7 @@ static unsigned int features[] = {
 	VIRTIO_BLK_F_RO, VIRTIO_BLK_F_BLK_SIZE,
 	VIRTIO_BLK_F_FLUSH, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_CONFIG_WCE,
 	VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_WRITE_ZEROES,
-	VIRTIO_BLK_F_SECURE_ERASE, VIRTIO_BLK_F_ZONED,
+	VIRTIO_BLK_F_VERIFY, VIRTIO_BLK_F_SECURE_ERASE, VIRTIO_BLK_F_ZONED,
 };
 
 static struct virtio_driver virtio_blk = {
