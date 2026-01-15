@@ -190,67 +190,6 @@ static __cold int io_register_restrictions(struct io_ring_ctx *ctx,
 	return 0;
 }
 
-static int io_register_restrictions_task(void __user *arg, unsigned int nr_args)
-{
-	struct io_uring_task_restriction __user *ures = arg;
-	struct io_uring_task_restriction tres;
-	struct io_restriction *res;
-	int ret;
-
-	/* Disallow if task already has registered restrictions */
-	if (current->io_uring_restrict)
-		return -EPERM;
-	if (nr_args != 1)
-		return -EINVAL;
-
-	if (copy_from_user(&tres, arg, sizeof(tres)))
-		return -EFAULT;
-
-	if (tres.flags)
-		return -EINVAL;
-	if (!mem_is_zero(tres.resv, sizeof(tres.resv)))
-		return -EINVAL;
-
-	res = kzalloc(sizeof(*res), GFP_KERNEL_ACCOUNT);
-	if (!res)
-		return -ENOMEM;
-
-	ret = io_parse_restrictions(ures->restrictions, tres.nr_res, res);
-	if (ret < 0) {
-		kfree(res);
-		return ret;
-	}
-	current->io_uring_restrict = res;
-	return 0;
-}
-
-static int io_register_bpf_filter_task(void __user *arg, unsigned int nr_args)
-{
-	struct io_restriction *res;
-	int ret;
-
-	if (nr_args != 1)
-		return -EINVAL;
-
-	/* If no task restrictions exist, setup a new set */
-	res = current->io_uring_restrict;
-	if (!res) {
-		res = kzalloc(sizeof(*res), GFP_KERNEL_ACCOUNT);
-		if (!res)
-			return -ENOMEM;
-	}
-
-	ret = io_register_bpf_filter(res, arg);
-	if (ret) {
-		if (res != current->io_uring_restrict)
-			kfree(res);
-		return ret;
-	}
-	if (!current->io_uring_restrict)
-		current->io_uring_restrict = res;
-	return 0;
-}
-
 static int io_register_enable_rings(struct io_ring_ctx *ctx)
 {
 	if (!(ctx->flags & IORING_SETUP_R_DISABLED))
@@ -394,7 +333,6 @@ static __cold int io_register_iowq_max_workers(struct io_ring_ctx *ctx,
 		return 0;
 
 	/* now propagate the restriction to all registered users */
-	mutex_lock(&ctx->tctx_lock);
 	list_for_each_entry(node, &ctx->tctx_list, ctx_node) {
 		tctx = node->task->io_uring;
 		if (WARN_ON_ONCE(!tctx->io_wq))
@@ -405,7 +343,6 @@ static __cold int io_register_iowq_max_workers(struct io_ring_ctx *ctx,
 		/* ignore errors, it always returns zero anyway */
 		(void)io_wq_max_workers(tctx->io_wq, new_count);
 	}
-	mutex_unlock(&ctx->tctx_lock);
 	return 0;
 err:
 	if (sqd) {
@@ -900,9 +837,6 @@ static int __io_uring_register(struct io_ring_ctx *ctx, unsigned opcode,
 		if (nr_args != 1)
 			break;
 		ret = io_register_bpf_filter(&ctx->restrictions, arg);
-		if (!ret)
-			WRITE_ONCE(ctx->bpf_filters,
-				   ctx->restrictions.bpf_filters->filters);
 		break;
 	default:
 		ret = -EINVAL;
@@ -975,10 +909,6 @@ static int io_uring_register_blind(unsigned int opcode, void __user *arg,
 		return io_uring_register_send_msg_ring(arg, nr_args);
 	case IORING_REGISTER_QUERY:
 		return io_query(arg, nr_args);
-	case IORING_REGISTER_RESTRICTIONS:
-		return io_register_restrictions_task(arg, nr_args);
-	case IORING_REGISTER_BPF_FILTER:
-		return io_register_bpf_filter_task(arg, nr_args);
 	}
 	return -EINVAL;
 }
