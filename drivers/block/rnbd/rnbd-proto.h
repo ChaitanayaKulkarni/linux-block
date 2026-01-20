@@ -145,6 +145,7 @@ enum rnbd_cache_policy {
  * @secure_discard:	supports secure discard
  * @obsolete_rotational: obsolete, not in used.
  * @cache_policy: 	support write-back caching or FUA?
+ * @max_verify_sectors:	max sectors for VERIFY in the 512b unit
  */
 struct rnbd_msg_open_rsp {
 	struct rnbd_msg_hdr	hdr;
@@ -162,7 +163,11 @@ struct rnbd_msg_open_rsp {
 	u8			obsolete_rotational;
 	u8			cache_policy;
 	/* private: */
-	u8			reserved[10];
+	u8			reserved[2];
+	/* public: */
+	__le32			max_verify_sectors;
+	/* private: */
+	u8			reserved2[4];
 };
 
 /**
@@ -194,6 +199,7 @@ struct rnbd_msg_io {
  * @RNBD_OP_DISCARD:        discard sectors
  * @RNBD_OP_SECURE_ERASE:   securely erase sectors
  * @RNBD_OP_WRITE_ZEROES:   write zeroes sectors
+ * @RNBD_OP_VERIFY:         verify sectors
  *
  * @RNBD_F_SYNC:	     request is sync (sync write or read)
  * @RNBD_F_FUA:             forced unit access
@@ -207,6 +213,7 @@ enum rnbd_io_flags {
 	RNBD_OP_DISCARD	= 3,
 	RNBD_OP_SECURE_ERASE	= 4,
 	RNBD_OP_WRITE_ZEROES	= 5,
+	RNBD_OP_VERIFY		= 6,
 
 	/* Flags */
 	RNBD_F_SYNC  = 1<<(RNBD_OP_BITS + 0),
@@ -246,6 +253,9 @@ static inline blk_opf_t rnbd_to_bio_flags(u32 rnbd_opf)
 	case RNBD_OP_WRITE_ZEROES:
 		bio_opf = REQ_OP_WRITE_ZEROES;
 		break;
+	case RNBD_OP_VERIFY:
+		bio_opf = REQ_OP_VERIFY;
+		break;
 	default:
 		WARN(1, "Unknown RNBD type: %d (flags %d)\n",
 		     rnbd_op(rnbd_opf), rnbd_opf);
@@ -283,6 +293,9 @@ static inline u32 rq_to_rnbd_flags(struct request *rq)
 		break;
 	case REQ_OP_FLUSH:
 		rnbd_opf = RNBD_OP_FLUSH;
+		break;
+	case REQ_OP_VERIFY:
+		rnbd_opf = RNBD_OP_VERIFY;
 		break;
 	default:
 		WARN(1, "Unknown request type %d (flags %llu)\n",

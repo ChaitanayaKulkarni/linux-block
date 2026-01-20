@@ -150,6 +150,10 @@ static int process_rdma(struct rnbd_srv_session *srv_sess,
 	bio_add_virt_nofail(bio, data, datalen);
 
 	bio->bi_opf = rnbd_to_bio_flags(le32_to_cpu(msg->rw));
+	/*
+	 * For payloadless operations (DISCARD, WRITE_ZEROES, VERIFY),
+	 * datalen is zero and bio_has_data() will be false
+	 */
 	if (bio_has_data(bio) &&
 	    bio->bi_iter.bi_size != le32_to_cpu(msg->bi_size)) {
 		rnbd_srv_err_rl(sess_dev, "Datalen mismatch:  bio bi_size (%u), bi_size (%u)\n",
@@ -552,6 +556,7 @@ static void rnbd_srv_fill_msg_open_rsp(struct rnbd_msg_open_rsp *rsp,
 	rsp->discard_granularity = cpu_to_le32(bdev_discard_granularity(bdev));
 	rsp->discard_alignment = cpu_to_le32(bdev_discard_alignment(bdev));
 	rsp->secure_discard = cpu_to_le16(bdev_max_secure_erase_sectors(bdev));
+	rsp->max_verify_sectors = cpu_to_le32(bdev_verify_sectors(bdev));
 	rsp->cache_policy = 0;
 	if (bdev_write_cache(bdev))
 		rsp->cache_policy |= RNBD_WRITEBACK;

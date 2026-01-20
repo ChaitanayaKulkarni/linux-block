@@ -1006,10 +1006,12 @@ static int rnbd_client_xfer_request(struct rnbd_clt_dev *dev,
 	msg.prio	= cpu_to_le16(req_get_ioprio(rq));
 
 	/*
-	 * We only support discards/WRITE_ZEROES with single segment for now.
+	 * We only support discards/WRITE_ZEROES/VERIFY with single segment for now.
 	 * See queue limits.
 	 */
-	if ((req_op(rq) != REQ_OP_DISCARD) && (req_op(rq) != REQ_OP_WRITE_ZEROES))
+	if ((req_op(rq) != REQ_OP_DISCARD) &&
+	    (req_op(rq) != REQ_OP_WRITE_ZEROES) &&
+	    (req_op(rq) != REQ_OP_VERIFY))
 		sg_cnt = blk_rq_map_sg(rq, iu->sgt.sgl);
 
 	if (sg_cnt == 0)
@@ -1373,6 +1375,7 @@ static int rnbd_client_setup_device(struct rnbd_clt_dev *dev,
 		.virt_boundary_mask	= SZ_4K - 1,
 		.max_write_zeroes_sectors =
 			le32_to_cpu(rsp->max_write_zeroes_sectors),
+		.max_verify_sectors	= le32_to_cpu(rsp->max_verify_sectors),
 	};
 	int idx = dev->clt_device_id;
 
