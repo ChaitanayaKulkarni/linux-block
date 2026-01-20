@@ -545,6 +545,8 @@ static int ioctl_verify_range(struct file *file, void __user *argp)
 	if (r.len == 0)
 		return 0;
 
+	pr_debug("VER_DBG: %-30s ino=%lu offset=%lld len=%lld flags=0x%x\n",
+		 __func__, inode->i_ino, r.offset, r.len, r.flags);
 	return file->f_op->verify_range(file, r.offset, r.len, r.flags);
 }
 

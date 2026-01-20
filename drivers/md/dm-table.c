@@ -1952,6 +1952,9 @@ static bool dm_table_supports_verify(struct dm_table *t)
 	for (unsigned int i = 0; i < t->num_targets; i++) {
 		struct dm_target *ti = dm_table_get_target(t, i);
 
+		pr_debug("VER_DBG: %-30s target[%u] type=%s num_verify_bios=%u\n",
+			 __func__, i, ti->type->name, ti->num_verify_bios);
+
 		if (!ti->num_verify_bios)
 			return false;
 
@@ -1960,6 +1963,7 @@ static bool dm_table_supports_verify(struct dm_table *t)
 			return false;
 	}
 
+	pr_debug("VER_DBG: %-30s result=supported\n", __func__);
 	return true;
 }
 

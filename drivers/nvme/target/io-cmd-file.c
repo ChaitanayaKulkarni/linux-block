@@ -375,6 +375,9 @@ static int nvmet_file_verify_emulate(struct nvmet_req *req, loff_t pos,
 	struct kiocb iocb;
 	ssize_t ret;
 
+	pr_debug("VER_DBG: %-30s [read-based emulation]: pos=%lld len=%lld\n",
+		 __func__, (long long)pos, (long long)len);
+
 	folio = folio_alloc(GFP_KERNEL, 0);
 	if (!folio)
 		return -ENOMEM;
@@ -433,6 +436,15 @@ static void nvmet_file_verify_work(struct work_struct *w)
 	offset = start_slba << req->ns->blksize_shift;
 	len = (((sector_t)le16_to_cpu(verify->length) + 1) <<
 			req->ns->blksize_shift);
+
+	pr_debug("VER_DBG: %-30s ns=%u slba=%llu length=%u\n",
+		 __func__, req->ns->nsid, start_slba,
+		 le16_to_cpu(verify->length));
+	pr_debug("VER_DBG: %-30s offset=%lld len=%lld\n",
+		 __func__, (long long)offset, (long long)len);
+	pr_debug("VER_DBG: %-30s path=%s\n", __func__,
+		 req->ns->file->f_op->verify_range ?
+		 "[using filesystem verify_range]" : "[using read-based emulation]");
 
 	if (unlikely(offset + len > req->ns->size)) {
 		req->error_slba = start_slba;

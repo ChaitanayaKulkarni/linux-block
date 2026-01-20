@@ -1657,6 +1657,8 @@ static blk_status_t __process_abnormal_io(struct clone_info *ci,
 	case REQ_OP_VERIFY:
 		num_bios = ti->num_verify_bios;
 		max_sectors = limits->max_verify_sectors;
+		pr_debug("VER_DBG: %-30s [dm] target=%s num_verify_bios=%u max_verify_sectors=%u\n",
+			 __func__, ti->type->name, num_bios, max_sectors);
 		break;
 	default:
 		break;

@@ -154,6 +154,12 @@ static int process_rdma(struct rnbd_srv_session *srv_sess,
 	 * For payloadless operations (DISCARD, WRITE_ZEROES, VERIFY),
 	 * datalen is zero and bio_has_data() will be false
 	 */
+	if ((le32_to_cpu(msg->rw) & RNBD_OP_MASK) == RNBD_OP_VERIFY)
+		pr_debug("VER_DBG: %-30s dev=%s sector=%llu nr_sectors=%u (RNBD_OP_VERIFY)\n",
+			 __func__, sess_dev->pathname,
+			 (unsigned long long)le64_to_cpu(msg->sector),
+			 le32_to_cpu(msg->bi_size) / SECTOR_SIZE);
+
 	if (bio_has_data(bio) &&
 	    bio->bi_iter.bi_size != le32_to_cpu(msg->bi_size)) {
 		rnbd_srv_err_rl(sess_dev, "Datalen mismatch:  bio bi_size (%u), bi_size (%u)\n",
@@ -557,6 +563,10 @@ static void rnbd_srv_fill_msg_open_rsp(struct rnbd_msg_open_rsp *rsp,
 	rsp->discard_alignment = cpu_to_le32(bdev_discard_alignment(bdev));
 	rsp->secure_discard = cpu_to_le16(bdev_max_secure_erase_sectors(bdev));
 	rsp->max_verify_sectors = cpu_to_le32(bdev_verify_sectors(bdev));
+
+	pr_debug("VER_DBG: %-30s dev=%pg max_verify_sectors=%u (advertising to client)\n",
+		 __func__, bdev, bdev_verify_sectors(bdev));
+
 	rsp->cache_policy = 0;
 	if (bdev_write_cache(bdev))
 		rsp->cache_policy |= RNBD_WRITEBACK;

@@ -1014,6 +1014,12 @@ static int rnbd_client_xfer_request(struct rnbd_clt_dev *dev,
 	    (req_op(rq) != REQ_OP_VERIFY))
 		sg_cnt = blk_rq_map_sg(rq, iu->sgt.sgl);
 
+	if (req_op(rq) == REQ_OP_VERIFY)
+		pr_debug("VER_DBG: %-30s rnbd%d sector=%llu nr_sectors=%u (payloadless)\n",
+			 __func__, dev->clt_device_id,
+			 (unsigned long long)blk_rq_pos(rq),
+			 blk_rq_sectors(rq));
+
 	if (sg_cnt == 0)
 		sg_mark_end(&iu->sgt.sgl[0]);
 
@@ -1378,6 +1384,9 @@ static int rnbd_client_setup_device(struct rnbd_clt_dev *dev,
 		.max_verify_sectors	= le32_to_cpu(rsp->max_verify_sectors),
 	};
 	int idx = dev->clt_device_id;
+
+	pr_debug("VER_DBG: %-30s rnbd%d max_verify_sectors=%u (from server)\n",
+		 __func__, idx, lim.max_verify_sectors);
 
 	dev->size = le64_to_cpu(rsp->nsectors) *
 			le16_to_cpu(rsp->logical_block_size);

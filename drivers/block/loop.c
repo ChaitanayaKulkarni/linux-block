@@ -294,6 +294,9 @@ static int lo_verify_file_emulate(struct loop_device *lo, struct file *file,
 	struct kiocb iocb;
 	ssize_t ret;
 
+	pr_debug("VER_DBG: %-30s [DIO read-based emulation]: lo%d pos=%lld len=%zd\n",
+		 __func__, lo->lo_number, (long long)pos, len);
+
 	folio = folio_alloc(GFP_NOIO, 0);
 	if (!folio)
 		return -ENOMEM;
@@ -350,8 +353,13 @@ static int lo_verify(struct loop_device *lo, struct request *rq, loff_t pos)
 	struct inode *inode = file->f_mapping->host;
 	ssize_t len = blk_rq_bytes(rq);
 
+	pr_debug("VER_DBG: %-30s lo%d pos=%lld len=%zd backing=%s\n",
+		 __func__, lo->lo_number, (long long)pos, len,
+		 S_ISBLK(inode->i_mode) ? "bdev" : "file");
+
 	/* Block-backed: forward to backing block device */
 	if (S_ISBLK(inode->i_mode)) {
+		pr_debug("VER_DBG: %-30s [forwarding to block device]\n", __func__);
 		return blkdev_issue_verify(I_BDEV(inode),
 					   pos >> SECTOR_SHIFT,
 					   len >> SECTOR_SHIFT,
@@ -359,13 +367,16 @@ static int lo_verify(struct loop_device *lo, struct request *rq, loff_t pos)
 	}
 
 	/* File-backed: use filesystem's verify_range if available */
-	if (file->f_op->verify_range)
+	if (file->f_op->verify_range) {
+		pr_debug("VER_DBG: %-30s [using filesystem verify_range]\n", __func__);
 		return file->f_op->verify_range(file, pos, len, 0);
+	}
 
 	/* Emulate with direct I/O reads - buffered would only verify cache */
 	if (!(lo->lo_flags & LO_FLAGS_DIRECT_IO))
 		return -EOPNOTSUPP;
 
+	pr_debug("VER_DBG: %-30s [using DIO read emulation]\n", __func__);
 	return lo_verify_file_emulate(lo, file, pos, len);
 }
 
@@ -523,6 +534,8 @@ static int do_req_filebacked(struct loop_device *lo, struct request *rq)
 	case REQ_OP_READ:
 		return lo_rw_aio(lo, cmd, pos, ITER_DEST);
 	case REQ_OP_VERIFY:
+		pr_debug("VER_DBG: %-30s [loop entry] lo%d pos=%lld bytes=%u\n",
+			 __func__, lo->lo_number, (long long)pos, blk_rq_bytes(rq));
 		return lo_verify(lo, rq, pos);
 	default:
 		WARN_ON_ONCE(1);
@@ -1050,6 +1063,8 @@ static void loop_config_verify(struct loop_device *lo, struct queue_limits *lim,
 	/* Block-backed: inherit from backing device */
 	if (S_ISBLK(inode->i_mode) && backing_bdev) {
 		lim->max_verify_sectors = bdev_verify_sectors(backing_bdev);
+		pr_debug("VER_DBG: %-30s lo%d [block-backed] max_verify_sectors=%u\n",
+			 __func__, lo->lo_number, lim->max_verify_sectors);
 		return;
 	}
 
@@ -1061,6 +1076,12 @@ static void loop_config_verify(struct loop_device *lo, struct queue_limits *lim,
 		lim->max_verify_sectors = UINT_MAX >> SECTOR_SHIFT;
 	else
 		lim->max_verify_sectors = 0;
+
+	pr_debug("VER_DBG: %-30s lo%d [file-backed] has_verify_range=%d dio=%d max_verify_sectors=%u\n",
+		 __func__, lo->lo_number,
+		 file->f_op->verify_range ? 1 : 0,
+		 (lo->lo_flags & LO_FLAGS_DIRECT_IO) ? 1 : 0,
+		 lim->max_verify_sectors);
 }
 
 static void loop_update_limits(struct loop_device *lo, struct queue_limits *lim,

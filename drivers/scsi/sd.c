@@ -1115,6 +1115,13 @@ static blk_status_t sd_setup_verify_cmnd(struct scsi_cmnd *cmd)
 	u64 lba = sectors_to_logical(sdp, blk_rq_pos(rq));
 	u32 nr_blocks = sectors_to_logical(sdp, blk_rq_sectors(rq));
 
+	pr_debug("VER_DBG: %-30s disk=%s sector=%llu nr_sectors=%u\n",
+		 __func__, rq->q->disk->disk_name,
+		 (unsigned long long)blk_rq_pos(rq),
+		 blk_rq_sectors(rq));
+	pr_debug("VER_DBG: %-30s lba=%llu nr_blocks=%u\n",
+		 __func__, lba, nr_blocks);
+
 	if (!sdkp->verify_16)
 		return BLK_STS_NOTSUPP;
 
@@ -3610,10 +3617,14 @@ static void sd_read_verify(struct scsi_disk *sdkp, unsigned char *buffer)
 	int ret;
 
 	sdkp->verify_16 = 1;
+	pr_debug("VER_DBG: %-30s disk=%s probing VERIFY(16) support\n",
+		 __func__, sdkp->disk->disk_name);
 
 	ret = scsi_report_opcode(sdev, buffer, SD_BUF_SIZE, VERIFY_16, 0);
 	if (ret <= 0)
 		sdkp->verify_16 = 0;
+	pr_debug("VER_DBG: %-30s disk=%s verify_16=%d ret=%d\n",
+		 __func__, sdkp->disk->disk_name, sdkp->verify_16, ret);
 }
 
 static void sd_read_security(struct scsi_disk *sdkp, unsigned char *buffer)

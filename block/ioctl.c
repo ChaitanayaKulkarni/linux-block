@@ -271,6 +271,11 @@ static int blk_ioctl_verify(struct block_device *bdev, blk_mode_t mode,
 	start = range[0];
 	len = range[1];
 
+	pr_debug("VER_DBG: %-30s dev=%pg start=%llu len=%llu\n",
+		 __func__, bdev, (unsigned long long)(start >> 9),
+		 (unsigned long long)(len >> 9));
+
+	/* Validate parameters */
 	if (len == 0)
 		return -EINVAL;
 	if ((start | len) & 511)

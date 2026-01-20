@@ -971,6 +971,9 @@ static int ext4_file_verify_range(struct file *file, loff_t offset,
 	struct inode *inode = file_inode(file);
 	int ret;
 
+	pr_debug("VER_DBG: %-30s ino=%lu offset=%lld len=%lld flags=0x%x\n",
+		 __func__, inode->i_ino, offset, len, flags);
+
 	if (ext4_forced_shutdown(inode->i_sb))
 		return -EIO;
 
@@ -985,6 +988,8 @@ static int ext4_file_verify_range(struct file *file, loff_t offset,
 	ret = iomap_file_verify(inode, offset, len, &ext4_iomap_ops, flags);
 	inode_unlock_shared(inode);
 
+	pr_debug("VER_DBG: %-30s ino=%lu ret=%d\n",
+		 __func__, inode->i_ino, ret);
 	return ret;
 }
 

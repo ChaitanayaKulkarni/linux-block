@@ -1000,6 +1000,12 @@ static inline blk_status_t nvme_setup_verify(struct nvme_ns *ns,
 	}
 
 	cmnd->verify.control = cpu_to_le16(control);
+
+	pr_debug("VER_DBG: %-30s ns=%u slba=%llu nlb=%u\n",
+		 __func__, ns->head->ns_id,
+		 le64_to_cpu(cmnd->verify.slba),
+		 le16_to_cpu(cmnd->verify.length) + 1);
+
 	return BLK_STS_OK;
 }
 

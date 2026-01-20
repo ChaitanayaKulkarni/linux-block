@@ -511,6 +511,10 @@ static void __blkdev_issue_verify(struct block_device *bdev,
 {
 	struct bio *bio;
 
+	pr_debug("VER_DBG: %-30s dev=%pg sector=%llu nr_sects=%llu limit=%llu\n",
+		 __func__, bdev, (unsigned long long)sector,
+		 (unsigned long long)nr_sects, (unsigned long long)limit);
+
 	while ((bio = blk_alloc_payloadless_bio(bdev, &sector, &nr_sects,
 					limit, REQ_OP_VERIFY, gfp_mask))) {
 		*biop = bio_chain_and_submit(*biop, bio);
@@ -580,6 +584,9 @@ static int blkdev_issue_verify_hw(struct block_device *bdev, sector_t sector,
 		nr_sects -= chunk;
 	}
 
+	pr_debug("VER_DBG: %-30s result=%d%s\n", __func__, ret,
+		 ret == -EOPNOTSUPP ? " (EOPNOTSUPP - falling back)" : "");
+
 	/*
 	 * For some devices there is no non-destructive way to verify whether
 	 * REQ_OP_VERIFY is actually supported.  These will clear the capability
@@ -611,6 +618,10 @@ int blkdev_issue_verify(struct block_device *bdev, sector_t sector,
 {
 	sector_t limit = bio_verify_limit(bdev);
 	int ret;
+
+	pr_debug("VER_DBG: %-30s dev=%pg sector=%llu nr_sects=%llu flags=0x%x\n",
+		 __func__, bdev, (unsigned long long)sector,
+		 (unsigned long long)nr_sects, flags);
 
 	if ((sector | nr_sects) & ((bdev_logical_block_size(bdev) >> 9) - 1))
 		return -EINVAL;

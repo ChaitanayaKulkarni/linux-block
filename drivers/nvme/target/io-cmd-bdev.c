@@ -469,6 +469,14 @@ static void nvmet_bdev_verify_work(struct work_struct *w)
 	nr_sector = (((sector_t)le16_to_cpu(verify->length) + 1) <<
 			(req->ns->blksize_shift - 9));
 
+	pr_debug("VER_DBG: %-30s ns=%u slba=%llu length=%u\n",
+		 __func__, req->ns->nsid,
+		 (unsigned long long)le64_to_cpu(verify->slba),
+		 le16_to_cpu(verify->length));
+	pr_debug("VER_DBG: %-30s dev=%pg sector=%llu nr_sector=%llu\n",
+		 __func__, req->ns->bdev,
+		 (unsigned long long)sector, (unsigned long long)nr_sector);
+
 	ret = blkdev_issue_verify(req->ns->bdev, sector, nr_sector,
 			GFP_KERNEL, 0);
 

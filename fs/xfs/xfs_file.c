@@ -1540,6 +1540,9 @@ xfs_file_verify_range(
 	struct xfs_inode	*ip = XFS_I(file_inode(file));
 	int			error;
 
+	pr_debug("VER_DBG: %-30s ino=%lu offset=%lld len=%lld flags=0x%x\n",
+		 __func__, VFS_I(ip)->i_ino, offset, len, flags);
+
 	/*
 	 * FS_IOC_VERIFY_RANGE behaves like a read, so bump atime to
 	 * preserve normal relatime/stat consistency for observers.
@@ -1559,6 +1562,8 @@ xfs_file_verify_range(
 				  &xfs_read_iomap_ops, flags);
 	xfs_iunlock(ip, XFS_IOLOCK_SHARED);
 
+	pr_debug("VER_DBG: %-30s ino=%lu error=%d\n",
+		 __func__, VFS_I(ip)->i_ino, error);
 	return error;
 }
 

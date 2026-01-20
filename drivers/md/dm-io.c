@@ -325,8 +325,15 @@ static void do_region(const blk_opf_t opf, unsigned int region,
 		special_cmd_max_sectors = bdev_max_discard_sectors(where->bdev);
 	else if (op == REQ_OP_WRITE_ZEROES)
 		special_cmd_max_sectors = q->limits.max_write_zeroes_sectors;
-	else if (op == REQ_OP_VERIFY)
+	else if (op == REQ_OP_VERIFY) {
 		special_cmd_max_sectors = bdev_verify_sectors(where->bdev);
+		pr_debug("VER_DBG: %-30s [dm-io] dev=%pg sector=%llu count=%llu max_sectors=%u\n",
+			 __func__, where->bdev,
+			 (unsigned long long)where->sector,
+			 (unsigned long long)where->count,
+			 special_cmd_max_sectors);
+	}
+
 	if ((op == REQ_OP_DISCARD || op == REQ_OP_WRITE_ZEROES || op == REQ_OP_VERIFY) &&
 	    special_cmd_max_sectors == 0) {
 		atomic_inc(&io->count);

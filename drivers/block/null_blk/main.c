@@ -1427,8 +1427,12 @@ blk_status_t null_process_cmd(struct nullb_cmd *cmd, enum req_op op,
 	if (dev->badblocks.shift != -1)
 		badblocks_ret = null_handle_badblocks(cmd, sector, &nr_sectors);
 
-	if (op == REQ_OP_VERIFY)
+	if (op == REQ_OP_VERIFY) {
+		pr_debug("VER_DBG: %-30s nullb%d sector=%llu nr_sectors=%u\n",
+			 __func__, dev->index,
+			 (unsigned long long)sector, nr_sectors);
 		return BLK_STS_OK;
+	}
 
 	if (dev->memory_backed && nr_sectors) {
 		ret = null_handle_memory_backed(cmd, op, sector, nr_sectors);
@@ -1812,6 +1816,10 @@ static void null_config_verify(struct nullb *nullb, struct queue_limits *lim)
 		return;
 
 	lim->max_verify_sectors = UINT_MAX >> 9;
+
+	pr_debug("VER_DBG: %-30s nullb%d verify=%d max_verify_sectors=%u\n",
+		 __func__, nullb->dev->index, nullb->dev->verify,
+		 lim->max_verify_sectors);
 }
 
 static const struct block_device_operations null_ops = {
