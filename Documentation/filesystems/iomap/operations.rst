@@ -783,3 +783,69 @@ This ioctl is deprecated; do **not** add a FIBMAP implementation to
 filesystems that do not have it.
 Callers should probably hold ``i_rwsem`` in shared mode before calling
 this function, but this is unclear.
+
+File Data Verification
+======================
+
+iomap implements file data verification for detecting media errors.
+
+FS_IOC_VERIFY_RANGE
+-------------------
+
+The ``iomap_file_verify`` function verifies that file data blocks are
+readable on the underlying storage media by issuing verify operations
+to the block device.
+It is called by filesystem implementations of the ``FS_IOC_VERIFY_RANGE``
+ioctl.
+
+The function iterates over file extents using the iomap infrastructure
+and issues ``REQ_OP_VERIFY`` requests to the block device for each
+mapped extent.
+``IOMAP_REPORT`` will be passed as the ``flags`` argument to
+``->iomap_begin``.
+
+Extent Handling
+~~~~~~~~~~~~~~~
+
+The function handles different extent types appropriately:
+
+ * ``IOMAP_MAPPED``: Issues verify requests to the physical storage.
+ * ``IOMAP_HOLE``: Skipped (no storage allocated).
+ * ``IOMAP_UNWRITTEN``: Skipped (preallocated but no user data).
+ * ``IOMAP_INLINE``: Skipped (data stored in inode, not on block device).
+ * ``IOMAP_DELALLOC``: Skipped (delayed allocation, not yet on disk).
+
+Return Values
+~~~~~~~~~~~~~
+
+The function returns:
+
+ * ``0`` on successful verification.
+ * ``-EOPNOTSUPP`` if hardware verify is not supported and the
+   ``FSVERIFY_RANGE_NOFALLBACK`` flag is set.
+ * ``-EINTR`` if interrupted by a fatal signal.
+ * ``-EIO`` on verification failure (media error detected).
+ * Other negative errno values on other failures.
+
+Flags
+~~~~~
+
+The ``flags`` parameter accepts:
+
+ * ``FSVERIFY_RANGE_NOFALLBACK``: Do not fall back to read verification
+   if hardware verify is unsupported.
+
+The function always allows interruption by fatal signals (e.g., SIGKILL).
+Signal checks occur between extent verifications.
+
+The function issues verify operations synchronously, blocking until
+each extent is verified.
+For large files or fragmented extents, this may take considerable time.
+
+Locking
+~~~~~~~
+
+Callers commonly hold ``i_rwsem`` in shared mode before calling this
+function.
+The caller must ensure that extent mappings remain stable during the
+verification operation.

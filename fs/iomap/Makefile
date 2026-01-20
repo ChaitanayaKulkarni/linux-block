@@ -15,5 +15,6 @@ iomap-$(CONFIG_BLOCK)		+= direct-io.o \
 				   ioend.o \
 				   fiemap.o \
 				   seek.o \
-				   bio.o
+				   bio.o \
+				   verify.o
 iomap-$(CONFIG_SWAP)		+= swapfile.o

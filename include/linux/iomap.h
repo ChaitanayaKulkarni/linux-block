@@ -380,6 +380,8 @@ loff_t iomap_seek_data(struct inode *inode, loff_t offset,
 		const struct iomap_ops *ops);
 sector_t iomap_bmap(struct address_space *mapping, sector_t bno,
 		const struct iomap_ops *ops);
+int iomap_file_verify(struct inode *inode, loff_t pos, loff_t len,
+		const struct iomap_ops *ops, unsigned int flags);
 
 /*
  * Flags for iomap_ioend->io_flags.

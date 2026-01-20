@@ -323,6 +323,53 @@ TRACE_EVENT(iomap_dio_complete,
 		  __entry->ret)
 );
 
+TRACE_EVENT(iomap_verify_extent,
+	TP_PROTO(struct inode *inode, struct iomap *iomap,
+		 loff_t pos, sector_t sector, sector_t nr_sects, int result),
+	TP_ARGS(inode, iomap, pos, sector, nr_sects, result),
+	TP_STRUCT__entry(
+		__field(dev_t, dev)
+		__field(u64, ino)
+		__field(u64, addr)
+		__field(loff_t, offset)
+		__field(u64, length)
+		__field(u16, type)
+		__field(loff_t, pos)
+		__field(sector_t, sector)
+		__field(sector_t, nr_sects)
+		__field(int, result)
+		__field(dev_t, bdev)
+	),
+	TP_fast_assign(
+		__entry->dev = inode->i_sb->s_dev;
+		__entry->ino = inode->i_ino;
+		__entry->addr = iomap->addr;
+		__entry->offset = iomap->offset;
+		__entry->length = iomap->length;
+		__entry->type = iomap->type;
+		__entry->pos = pos;
+		__entry->sector = sector;
+		__entry->nr_sects = nr_sects;
+		__entry->result = result;
+		__entry->bdev = iomap->bdev ? iomap->bdev->bd_dev : 0;
+	),
+	TP_printk("dev %d:%d ino 0x%llx bdev %d:%d pos 0x%llx sector 0x%llx "
+		  "nr_sects 0x%llx addr 0x%llx offset 0x%llx length 0x%llx "
+		  "type %s (0x%x) result %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->ino,
+		  MAJOR(__entry->bdev), MINOR(__entry->bdev),
+		  __entry->pos,
+		  __entry->sector,
+		  __entry->nr_sects,
+		  __entry->addr,
+		  __entry->offset,
+		  __entry->length,
+		  __print_symbolic(__entry->type, IOMAP_TYPE_STRINGS),
+		  __entry->type,
+		  __entry->result)
+);
+
 #endif /* _IOMAP_TRACE_H */
 
 #undef TRACE_INCLUDE_PATH
